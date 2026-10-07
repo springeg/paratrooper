@@ -106,12 +106,76 @@ class Plane{
 		if(this.dir>0 && this.x>W+130 || this.dir<0 && this.x<-130) this.remove=true;
 	}
 	draw(){
-		ctx.save(); ctx.translate(this.x,this.y); ctx.rotate(this.rot); ctx.scale(this.dir,1);
-		ctx.lineWidth=3; ctx.strokeStyle="#353535"; ctx.fillStyle=this.dead?"#8f8583":"#b7aaa7";
-		ctx.beginPath(); ctx.roundRect(-52,-13,104,26,13); ctx.fill(); ctx.stroke();
-		ctx.beginPath(); ctx.moveTo(-28,-13); ctx.lineTo(-34,-34); ctx.lineTo(-22,-34); ctx.lineTo(-11,-13); ctx.fill(); ctx.stroke();
-		ctx.beginPath(); ctx.moveTo(17,-13); ctx.lineTo(38,-13); ctx.lineTo(31,-30); ctx.lineTo(22,-30); ctx.closePath(); ctx.fill(); ctx.stroke();
-		ctx.beginPath(); ctx.ellipse(2,1,17,4,0,0,Math.PI*2); ctx.stroke();
+		ctx.save();
+		ctx.translate(this.x,this.y);
+		ctx.rotate(this.rot);
+		ctx.scale(this.dir,1);
+
+		ctx.lineWidth=3;
+		ctx.strokeStyle="#353535";
+		ctx.fillStyle=this.dead?"#8f8583":"#b7aaa7";
+
+		// Main fuselage with a rounded nose and tapered tail.
+		ctx.beginPath();
+		ctx.moveTo(-58,-8);
+		ctx.quadraticCurveTo(-68,0,-58,8);
+		ctx.lineTo(34,8);
+		ctx.quadraticCurveTo(51,7,59,0);
+		ctx.quadraticCurveTo(51,-7,34,-8);
+		ctx.closePath();
+		ctx.fill();
+		ctx.stroke();
+
+		// Main wing.
+		ctx.beginPath();
+		ctx.moveTo(-8,-4);
+		ctx.lineTo(17,-29);
+		ctx.lineTo(32,-29);
+		ctx.lineTo(18,-3);
+		ctx.closePath();
+		ctx.fill();
+		ctx.stroke();
+
+		ctx.beginPath();
+		ctx.moveTo(-8,4);
+		ctx.lineTo(17,29);
+		ctx.lineTo(32,29);
+		ctx.lineTo(18,3);
+		ctx.closePath();
+		ctx.fill();
+		ctx.stroke();
+
+		// Tailplane and vertical stabilizer.
+		ctx.beginPath();
+		ctx.moveTo(33,-5);
+		ctx.lineTo(47,-22);
+		ctx.lineTo(55,-22);
+		ctx.lineTo(51,-4);
+		ctx.closePath();
+		ctx.fill();
+		ctx.stroke();
+
+		ctx.beginPath();
+		ctx.moveTo(35,4);
+		ctx.lineTo(50,16);
+		ctx.lineTo(56,16);
+		ctx.lineTo(50,3);
+		ctx.closePath();
+		ctx.fill();
+		ctx.stroke();
+
+		// Cockpit window and nose detail.
+		ctx.fillStyle="#eef3f3";
+		ctx.beginPath();
+		ctx.ellipse(-35,-2,10,4,0,0,Math.PI*2);
+		ctx.fill();
+		ctx.stroke();
+
+		ctx.fillStyle="#353535";
+		ctx.beginPath();
+		ctx.arc(-53,0,2.5,0,Math.PI*2);
+		ctx.fill();
+
 		ctx.restore();
 	}
 }
@@ -132,6 +196,9 @@ class Trooper{
 		}else if(this.state==="fall"){
 			this.vy+=420*dt; this.x+=this.vx*dt; this.y+=this.vy*dt;
 			if(this.y>groundY-8){ this.y=groundY-8; splats.push({x:this.x,y:groundY-4,t:5}); this.remove=true; score+=20; }
+		}else if(this.state==="deadfall"){
+			this.vy+=470*dt; this.x+=this.vx*dt; this.y+=this.vy*dt;
+			if(this.y>groundY-8){ this.y=groundY-8; splats.push({x:this.x,y:groundY-4,t:5}); this.remove=true; }
 		}else if(this.state==="walk"){
 			const tx=W/2 + (this.x<W/2?-72:72);
 			const dx=tx-this.x;
@@ -160,7 +227,7 @@ class Trooper{
 			ctx.beginPath(); ctx.arc(0,-25,17,Math.PI,0); ctx.closePath(); ctx.fill(); ctx.stroke();
 			ctx.beginPath(); ctx.moveTo(-17,-25);ctx.lineTo(0,-8);ctx.moveTo(17,-25);ctx.lineTo(0,-8);ctx.moveTo(0,-42);ctx.lineTo(0,-8);ctx.stroke();
 		}
-		drawPerson(0,0,this.state==="fall",this.wave);
+		drawPerson(0,0,this.state==="fall",this.wave,this.state==="deadfall");
 		if(this.state==="fuse"){
 			ctx.fillStyle="#333";ctx.fillRect(-4,5,9,8);
 			ctx.strokeStyle="#d33";ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(4,6);ctx.quadraticCurveTo(10,1,8,-4);ctx.stroke();
@@ -169,12 +236,17 @@ class Trooper{
 	}
 }
 
-function drawPerson(x,y,fall,wave){
+function drawPerson(x,y,fall,wave,dead=false){
 	ctx.save();ctx.translate(x,y);
 	ctx.strokeStyle="#087f75";ctx.fillStyle="#087f75";ctx.lineWidth=3;ctx.lineCap="round";
 	ctx.beginPath();ctx.arc(0,-8,3.2,0,Math.PI*2);ctx.fill();
 	ctx.beginPath();ctx.moveTo(0,-4);ctx.lineTo(0,8);
-	if(fall){
+	if(dead){
+		ctx.moveTo(0,0);ctx.lineTo(-7,6);
+		ctx.moveTo(0,0);ctx.lineTo(6,7);
+		ctx.moveTo(0,8);ctx.lineTo(-5,14);
+		ctx.moveTo(0,8);ctx.lineTo(4,15);
+	}else if(fall){
 		const a=Math.sin(wave)*7;
 		ctx.moveTo(0,0);ctx.lineTo(-8,-2+a*.2);ctx.moveTo(0,0);ctx.lineTo(8,2-a*.2);
 		ctx.moveTo(0,8);ctx.lineTo(-6,15+a*.15);ctx.moveTo(0,8);ctx.lineTo(7,14-a*.15);
@@ -223,7 +295,15 @@ function updateBullets(dt){
 				b.hit=true;t.chute=false;t.state="fall";t.vy=30;t.vx+=rand(-25,25);score+=10;spark(b.x,b.y);break;
 			}
 			if(dist2(b.x,b.y,t.x,t.y)<11*11){
-				b.hit=true;t.chute=false;t.state="fall";t.vy=40;t.vx+=rand(-35,35);score+=25;spark(b.x,b.y);break;
+				b.hit=true;
+				t.chute=false;
+				t.dead=true;
+				t.state="deadfall";
+				t.vy=55;
+				t.vx+=rand(-30,30);
+				score+=50;
+				spark(b.x,b.y);
+				break;
 			}
 		}
 	}
