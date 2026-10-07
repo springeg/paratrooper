@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Paratrooper</title>
+<style>
+	html,body{margin:0;height:100%;overflow:hidden;background:#f7f7f4;font-family:Arial,Helvetica,sans-serif;color:#2e2e2e}
+	canvas{display:block;width:100vw;height:100vh;cursor:crosshair}
+	#hud{position:fixed;left:14px;top:12px;display:flex;gap:18px;align-items:center;background:rgba(255,255,255,.82);border:2px solid #333;padding:8px 12px;border-radius:10px;user-select:none}
+	#hud span{min-width:92px}
+	button{font:inherit;border:2px solid #333;border-radius:7px;background:white;padding:6px 10px;cursor:pointer}
+	button:hover{background:#eee}
+	#help{position:fixed;right:14px;top:14px;background:rgba(255,255,255,.82);border:2px solid #333;border-radius:10px;padding:8px 12px;user-select:none}
+	dialog{border:2px solid #333;border-radius:12px;padding:18px;max-width:440px}
+	dialog::backdrop{background:rgba(0,0,0,.28)}
+	label{display:grid;grid-template-columns:1fr 90px;gap:10px;align-items:center;margin:10px 0}
+	input[type=range]{grid-column:1/3;width:100%}
+	.row{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+	.small{font-size:13px;color:#555}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud">
+	<span>Score: <b id="score">0</b></span>
+	<span>Level: <b id="level">1</b></span>
+	<span>Turret: <b id="health">100</b>%</span>
+	<button id="settingsBtn">Settings</button>
+	<button id="restartBtn">Restart</button>
+</div>
+<div id="help">Aim with mouse · Hold right mouse button or Space to fire</div>
+
+<dialog id="settings">
+	<h2>Game settings</h2>
+	<label>Fire interval (ms) <output id="fireOut"></output><input id="fire" type="range" min="45" max="350" step="5"></label>
+	<label>Base drop interval (ms) <output id="dropOut"></output><input id="drop" type="range" min="350" max="2600" step="50"></label>
+	<label>Starting planes <output id="planesOut"></output><input id="planes" type="range" min="1" max="8" step="1"></label>
+	<label>Plane hit points <output id="hpOut"></output><input id="hp" type="range" min="1" max="10" step="1"></label>
+	<label>Pyramid size <output id="pyrOut"></output><input id="pyr" type="range" min="4" max="14" step="1"></label>
+	<label>Difficulty growth <output id="diffOut"></output><input id="diff" type="range" min="0" max="2" step=".1"></label>
+	<div class="small">Changes take effect immediately. Difficulty increases plane speed, active plane count, and paratrooper drop frequency over time.</div>
+	<div class="row"><button id="closeSettings">Close</button></div>
+</dialog>
+
+<script>
+"use strict";
+
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const scoreEl = document.getElementById("score");
+const levelEl = document.getElementById("level");
+const healthEl = document.getElementById("health");
+const settings = document.getElementById("settings");
+
+let W=0,H=0,groundY=0,dpr=1;
+let mouse={x:0,y:0}, firing=false, spaceHeld=false, rightHeld=false;
+let score=0, elapsed=0, gameOver=false, turretHealth=100, lastFire=0;
+let planes=[], bullets=[], troopers=[], particles=[], explosions=[], splats=[];
+let planeSpawnTimer=0, nextPlaneId=1;
+
+const cfg={
+	fireInterval:110,
+	dropInterval:1250,
+	startPlanes:2,
+	planeHP:4,
+	pyramidSize:7,
+	difficulty:1
+};
+
+function resize(){
+	dpr=Math.min(devicePixelRatio||1,2);
+	W=innerWidth; H=innerHeight; groundY=H-72;
+	canvas.width=Math.round(W*dpr); canvas.height=Math.round(H*dpr);
+	ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+addEventListener("resize",resize); resize();
+
+function rand(a,b){return a+Math.random()*(b-a)}
+function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
+function dist2(ax,ay,bx,by){const dx=ax-bx,dy=ay-by;return dx*dx+dy*dy}
+
+class Plane{
+	constructor(dir){
+		this.dir=dir|| (Math.random()<.5?1:-1);
+		this.x=this.dir>0?-110:W+110;
+		this.y=rand(70,Math.max(130,H*.34));
+		this.speed=rand(70,105);
+		this.hp=cfg.planeHP;
+		this.dropT=rand(150,cfg.dropInterval);
+		this.dead=false;
+		this.vy=0; this.rot=0; this.id=nextPlaneId++;
+	}
+	update(dt,diff){
+		if(this.dead){
+			this.vy+=190*dt; this.y+=this.vy*dt; this.x+=this.dir*this.speed*.55*dt; this.rot+=this.dir*1.8*dt;
+			if(this.y>groundY-15){ explosion(this.x,this.y,34); this.remove=true; }
+			return;
+		}
+		this.x+=this.dir*this.speed*diff*dt;
+		this.dropT-=dt*1000*diff;
+		if(this.dropT<=0 && this.x>80 && this.x<W-80){
+			troopers.push(new Trooper(this.x,this.y+18));
+			this.dropT=rand(cfg.dropInterval*.75,cfg.dropInterval*1.25);
+		}
+		if(this.dir>0 && this.x>W+130 || this.dir<0 && this.x<-130) this.remove=true;
+	}
+	draw(){
+		ctx.save(); ctx.translate(this.x,this.y); ctx.rotate(this.rot); ctx.scale(this.dir,1);
+		ctx.lineWidth=3; ctx.strokeStyle="#353535"; ctx.fillStyle=this.dead?"#8f8583":"#b7aaa7";
+		ctx.beginPath(); ctx.roundRect(-52,-13,104,26,13); ctx.fill(); ctx.stroke();
+		ctx.beginPath(); ctx.moveTo(-28,-13); ctx.lineTo(-34,-34); ctx.lineTo(-22,-34); ctx.lineTo(-11,-13); ctx.fill(); ctx.stroke();
+		ctx.beginPath(); ctx.moveTo(17,-13); ctx.lineTo(38,-13); ctx.lineTo(31,-30); ctx.lineTo(22,-30); ctx.closePath(); ctx.fill(); ctx.stroke();
+		ctx.beginPath(); ctx.ellipse(2,1,17,4,0,0,Math.PI*2); ctx.stroke();
+		ctx.restore();
+	}
+}
+
+class Trooper{
+	constructor(x,y){
+		this.x=x; this.y=y; this.vx=rand(-12,12); this.vy=20; this.state="jump"; this.t=0;
+		this.chute=false; this.dead=false; this.targetX=W/2; this.walkDir=0; this.stackIndex=-1; this.wave=0;
+	}
+	update(dt){
+		this.t+=dt; this.wave+=dt*10;
+		if(this.state==="jump"){
+			this.vy+=170*dt; this.x+=this.vx*dt; this.y+=this.vy*dt;
+			if(this.t>.6){this.state="chute";this.chute=true;this.vy=54;}
+		}else if(this.state==="chute"){
+			this.x+=this.vx*.12*dt; this.y+=this.vy*dt;
+			if(this.y>groundY-20){ this.y=groundY-20; this.chute=false; this.state="walk"; this.t=0; }
+		}else if(this.state==="fall"){
+			this.vy+=420*dt; this.x+=this.vx*dt; this.y+=this.vy*dt;
+			if(this.y>groundY-8){ this.y=groundY-8; splats.push({x:this.x,y:groundY-4,t:5}); this.remove=true; score+=20; }
+		}else if(this.state==="walk"){
+			const tx=W/2 + (this.x<W/2?-72:72);
+			const dx=tx-this.x;
+			this.walkDir=Math.sign(dx)||1;
+			this.x+=this.walkDir*35*dt;
+			if(Math.abs(dx)<5){this.state="stack";this.t=0;}
+		}else if(this.state==="stack"){
+			// position is handled in pyramid layout
+		}else if(this.state==="runner"){
+			const tx=W/2;
+			const dx=tx-this.x;
+			this.walkDir=Math.sign(dx)||1;
+			this.x+=this.walkDir*62*dt;
+			this.y-=Math.min(20,Math.abs(dx)*.03)*dt;
+			if(Math.abs(dx)<18){this.state="plant";this.t=0;}
+		}else if(this.state==="plant"){
+			if(this.t>1.0){this.state="fuse";this.t=0;}
+		}else if(this.state==="fuse"){
+			if(this.t>2.0){ explodeTurret(); }
+		}
+	}
+	draw(){
+		ctx.save(); ctx.translate(this.x,this.y);
+		if(this.chute){
+			ctx.lineWidth=2.2; ctx.strokeStyle="#333"; ctx.fillStyle="#c7bdbb";
+			ctx.beginPath(); ctx.arc(0,-25,17,Math.PI,0); ctx.closePath(); ctx.fill(); ctx.stroke();
+			ctx.beginPath(); ctx.moveTo(-17,-25);ctx.lineTo(0,-8);ctx.moveTo(17,-25);ctx.lineTo(0,-8);ctx.moveTo(0,-42);ctx.lineTo(0,-8);ctx.stroke();
+		}
+		drawPerson(0,0,this.state==="fall",this.wave);
+		if(this.state==="fuse"){
+			ctx.fillStyle="#333";ctx.fillRect(-4,5,9,8);
+			ctx.strokeStyle="#d33";ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(4,6);ctx.quadraticCurveTo(10,1,8,-4);ctx.stroke();
+		}
+		ctx.restore();
+	}
+}
+
+function drawPerson(x,y,fall,wave){
+	ctx.save();ctx.translate(x,y);
+	ctx.strokeStyle="#087f75";ctx.fillStyle="#087f75";ctx.lineWidth=3;ctx.lineCap="round";
+	ctx.beginPath();ctx.arc(0,-8,3.2,0,Math.PI*2);ctx.fill();
+	ctx.beginPath();ctx.moveTo(0,-4);ctx.lineTo(0,8);
+	if(fall){
+		const a=Math.sin(wave)*7;
+		ctx.moveTo(0,0);ctx.lineTo(-8,-2+a*.2);ctx.moveTo(0,0);ctx.lineTo(8,2-a*.2);
+		ctx.moveTo(0,8);ctx.lineTo(-6,15+a*.15);ctx.moveTo(0,8);ctx.lineTo(7,14-a*.15);
+	}else{
+		ctx.moveTo(0,0);ctx.lineTo(-6,5);ctx.moveTo(0,0);ctx.lineTo(6,4);
+		ctx.moveTo(0,8);ctx.lineTo(-4,15);ctx.moveTo(0,8);ctx.lineTo(5,15);
+	}
+	ctx.stroke();ctx.restore();
+}
+
+function drawTurret(){
+	const x=W/2,y=groundY;
+	ctx.lineWidth=3;ctx.strokeStyle="#333";ctx.fillStyle="#b5aaa6";
+	ctx.fillRect(x-34,y-34,68,34);ctx.strokeRect(x-34,y-34,68,34);
+	ctx.beginPath();ctx.arc(x,y-34,20,Math.PI,0);ctx.fill();ctx.stroke();
+	const ang=Math.atan2(mouse.y-(y-42),mouse.x-x);
+	ctx.save();ctx.translate(x,y-42);ctx.rotate(ang);ctx.fillStyle="#b5aaa6";ctx.strokeStyle="#333";ctx.fillRect(4,-4,38,8);ctx.strokeRect(4,-4,38,8);ctx.restore();
+}
+
+function shoot(now){
+	if(gameOver || now-lastFire<cfg.fireInterval) return;
+	lastFire=now;
+	const ox=W/2,oy=groundY-42;
+	const ang=Math.atan2(mouse.y-oy,mouse.x-ox);
+	const speed=760;
+	bullets.push({x:ox+Math.cos(ang)*30,y:oy+Math.sin(ang)*30,vx:Math.cos(ang)*speed,vy:Math.sin(ang)*speed,r:3});
+}
+
+function updateBullets(dt){
+	for(const b of bullets){b.x+=b.vx*dt;b.y+=b.vy*dt;}
+	for(const b of bullets){
+		if(b.hit) continue;
+		for(const p of planes){
+			if(p.dead) continue;
+			if(Math.abs(b.x-p.x)<55 && Math.abs(b.y-p.y)<18){
+				b.hit=true;p.hp--;score+=5;
+				spark(b.x,b.y);
+				if(p.hp<=0){p.dead=true;p.vy=30;score+=100;}
+				break;
+			}
+		}
+		if(b.hit) continue;
+		for(const t of troopers){
+			if(t.remove || t.state==="stack" || t.state==="runner" || t.state==="plant" || t.state==="fuse") continue;
+			if(t.chute && dist2(b.x,b.y,t.x,t.y-25)<19*19){
+				b.hit=true;t.chute=false;t.state="fall";t.vy=30;t.vx+=rand(-25,25);score+=10;spark(b.x,b.y);break;
+			}
+			if(dist2(b.x,b.y,t.x,t.y)<11*11){
+				b.hit=true;t.chute=false;t.state="fall";t.vy=40;t.vx+=rand(-35,35);score+=25;spark(b.x,b.y);break;
+			}
+		}
+	}
+	bullets=bullets.filter(b=>!b.hit&&b.x>-20&&b.x<W+20&&b.y>-20&&b.y<H+20);
+}
+
+function spark(x,y){for(let i=0;i<5;i++)particles.push({x,y,vx:rand(-70,70),vy:rand(-70,20),t:.35})}
+function explosion(x,y,r){explosions.push({x,y,r:3,max:r,t:.45});for(let i=0;i<14;i++)particles.push({x,y,vx:rand(-140,140),vy:rand(-170,80),t:rand(.4,.9)})}
+function explodeTurret(){
+	if(gameOver)return;
+	explosion(W/2,groundY-25,90);turretHealth=0;gameOver=true;
+}
+
+function pyramidLayout(){
+	const stackers=troopers.filter(t=>t.state==="stack");
+	for(let i=0;i<stackers.length;i++){
+		const t=stackers[i];
+		let remaining=i,row=0;
+		while(remaining>row+1){remaining-=row+2;row++;}
+		const count=row+2;
+		const side=i%2===0?-1:1;
+		const slot=Math.floor(i/2);
+		const level=Math.floor((Math.sqrt(8*slot+1)-1)/2);
+		const pos=slot-level*(level+1)/2;
+		t.x=W/2 + side*(56-level*7 + pos*11);
+		t.y=groundY-17-level*14;
+	}
+	const ready=stackers.length>=cfg.pyramidSize && !troopers.some(t=>["runner","plant","fuse"].includes(t.state));
+	if(ready){
+		const candidate=stackers[stackers.length-1];
+		candidate.state="runner";
+	}
+}
+
+function difficulty(){
+	const lvl=1+Math.floor(elapsed/35);
+	const factor=1+(lvl-1)*.10*cfg.difficulty;
+	return {lvl,factor,maxPlanes:Math.min(10,cfg.startPlanes+Math.floor((lvl-1)*cfg.difficulty*.7))};
+}
+
+function spawnPlanes(dt,d){
+	planeSpawnTimer-=dt;
+	if(planes.filter(p=>!p.remove).length<d.maxPlanes && planeSpawnTimer<=0){
+		planes.push(new Plane());
+		planeSpawnTimer=rand(.3,1.2);
+	}
+}
+
+function reset(){
+	score=0;elapsed=0;gameOver=false;turretHealth=100;lastFire=0;planeSpawnTimer=0;
+	planes=[];bullets=[];troopers=[];particles=[];explosions=[];splats=[];
+	for(let i=0;i<cfg.startPlanes;i++){const p=new Plane(i%2?1:-1);p.x=rand(0,W);planes.push(p);}
+}
+
+function update(dt,now){
+	if(!gameOver){
+		elapsed+=dt;
+		const d=difficulty(); levelEl.textContent=d.lvl;
+		spawnPlanes(dt,d);
+		for(const p of planes)p.update(dt,d.factor);
+		for(const t of troopers)t.update(dt);
+		pyramidLayout();
+		updateBullets(dt);
+		if(firing||spaceHeld||rightHeld)shoot(now);
+		planes=planes.filter(p=>!p.remove);
+		troopers=troopers.filter(t=>!t.remove);
+	}
+	for(const p of particles){p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=240*dt;p.t-=dt}
+	particles=particles.filter(p=>p.t>0);
+	for(const e of explosions){e.t-=dt;e.r+=(e.max-e.r)*.23}
+	explosions=explosions.filter(e=>e.t>0);
+	for(const s of splats)s.t-=dt;
+	splats=splats.filter(s=>s.t>0);
+	scoreEl.textContent=score;
+	healthEl.textContent=Math.round(turretHealth);
+}
+
+function draw(){
+	ctx.clearRect(0,0,W,H);
+	ctx.fillStyle="#fafaf7";ctx.fillRect(0,0,W,H);
+	// sky guide marks
+	ctx.strokeStyle="#333";ctx.lineWidth=5;ctx.beginPath();ctx.moveTo(0,groundY);ctx.lineTo(W,groundY);ctx.stroke();
+	// simple trees
+	drawTree(120,groundY); drawTree(W-115,groundY);
+	for(const s of splats){ctx.fillStyle="#087f75";ctx.beginPath();ctx.ellipse(s.x,s.y,14,3,0,0,Math.PI*2);ctx.fill();}
+	for(const p of planes)p.draw();
+	for(const t of troopers)t.draw();
+	drawTurret();
+	ctx.fillStyle="#333";
+	for(const b of bullets){ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);ctx.fill();}
+	for(const p of particles){ctx.globalAlpha=clamp(p.t*2,0,1);ctx.fillStyle="#333";ctx.fillRect(p.x,p.y,3,3);ctx.globalAlpha=1}
+	for(const e of explosions){
+		ctx.save();ctx.globalAlpha=clamp(e.t*2.3,0,1);ctx.strokeStyle="#333";ctx.lineWidth=4;ctx.beginPath();ctx.arc(e.x,e.y,e.r,0,Math.PI*2);ctx.stroke();
+		for(let i=0;i<10;i++){const a=i*Math.PI*2/10;ctx.beginPath();ctx.moveTo(e.x+Math.cos(a)*e.r*.7,e.y+Math.sin(a)*e.r*.7);ctx.lineTo(e.x+Math.cos(a)*e.r*1.25,e.y+Math.sin(a)*e.r*1.25);ctx.stroke()}
+		ctx.restore();
+	}
+	if(gameOver){
+		ctx.fillStyle="rgba(255,255,255,.78)";ctx.fillRect(0,0,W,H);
+		ctx.fillStyle="#222";ctx.textAlign="center";ctx.font="700 58px Arial";ctx.fillText("TURRET DESTROYED",W/2,H/2-20);
+		ctx.font="28px Arial";ctx.fillText("Score: "+score,W/2,H/2+28);
+		ctx.font="20px Arial";ctx.fillText("Press Restart to play again",W/2,H/2+68);
+	}
+}
+
+function drawTree(x,y){
+	ctx.strokeStyle="#333";ctx.lineWidth=5;ctx.fillStyle="white";
+	ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x,y-34);ctx.stroke();
+	ctx.beginPath();ctx.arc(x,y-52,22,0,Math.PI*2);ctx.fill();ctx.stroke();
+}
+
+canvas.addEventListener("mousemove",e=>{mouse.x=e.clientX;mouse.y=e.clientY});
+canvas.addEventListener("contextmenu",e=>e.preventDefault());
+canvas.addEventListener("mousedown",e=>{
+	if(e.button===2){rightHeld=true;e.preventDefault()}
+	if(e.button===0){firing=true;shoot(performance.now())}
+});
+addEventListener("mouseup",e=>{if(e.button===2)rightHeld=false;if(e.button===0)firing=false});
+addEventListener("keydown",e=>{if(e.code==="Space"){spaceHeld=true;e.preventDefault()}});
+addEventListener("keyup",e=>{if(e.code==="Space"){spaceHeld=false;e.preventDefault()}});
+
+document.getElementById("restartBtn").onclick=reset;
+document.getElementById("settingsBtn").onclick=()=>settings.showModal();
+document.getElementById("closeSettings").onclick=()=>settings.close();
+
+const binds=[
+	["fire","fireOut","fireInterval",v=>v+" ms"],
+	["drop","dropOut","dropInterval",v=>v+" ms"],
+	["planes","planesOut","startPlanes",v=>v],
+	["hp","hpOut","planeHP",v=>v],
+	["pyr","pyrOut","pyramidSize",v=>v],
+	["diff","diffOut","difficulty",v=>Number(v).toFixed(1)+"×"]
+];
+for(const [id,out,key,fmt] of binds){
+	const el=document.getElementById(id),o=document.getElementById(out);
+	el.value=cfg[key];o.textContent=fmt(el.value);
+	el.oninput=()=>{cfg[key]=Number(el.value);o.textContent=fmt(el.value)};
+}
+
+let last=performance.now();
+function loop(now){
+	const dt=Math.min(.033,(now-last)/1000);last=now;
+	update(dt,now);draw();requestAnimationFrame(loop);
+}
+reset();requestAnimationFrame(loop);
+</script>
+</body>
+</html>
