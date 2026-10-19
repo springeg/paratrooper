@@ -95,7 +95,11 @@ class Plane{
 	update(dt,diff){
 		if(this.dead){
 			this.vy+=190*dt; this.y+=this.vy*dt; this.x+=this.dir*this.speed*.55*dt; this.rot+=this.dir*1.8*dt;
-			if(this.y>groundY-15){ explosion(this.x,this.y,34); this.remove=true; }
+			if(this.y>groundY-15){
+				colorExplosion(this.x,this.y,46);
+				explosion(this.x,this.y,34);
+				this.remove=true;
+			}
 			return;
 		}
 		this.x+=this.dir*this.speed*diff*dt;
@@ -199,10 +203,7 @@ class UFO{
 	update(dt){
 		this.age+=dt;
 		if(this.dead){
-			this.y+=120*dt;
-			this.x+=this.dir*this.speed*.25*dt;
-			this.phase+=dt*8;
-			if(this.y>groundY){explosion(this.x,this.y,42);this.remove=true;}
+			this.remove=true;
 			return;
 		}
 		// Erratic horizontal and vertical motion.
@@ -355,7 +356,12 @@ function updateBullets(dt){
 			if(u.dead) continue;
 			if(dist2(b.x,b.y,u.x,u.y)<38*38){
 				b.hit=true;u.hp--;score+=8;spark(b.x,b.y);
-				if(u.hp<=0){u.dead=true;score+=175;colorExplosion(u.x,u.y,48);}
+				if(u.hp<=0){
+					u.dead=true;
+					u.remove=true;
+					score+=175;
+					colorExplosion(u.x,u.y,48);
+				}
 				break;
 			}
 		}
@@ -365,7 +371,12 @@ function updateBullets(dt){
 			if(Math.abs(b.x-p.x)<55 && Math.abs(b.y-p.y)<18){
 				b.hit=true;p.hp--;score+=5;
 				spark(b.x,b.y);
-				if(p.hp<=0){p.dead=true;p.vy=30;score+=100;}
+				if(p.hp<=0){
+					p.dead=true;
+					p.vy=30;
+					score+=100;
+					colorExplosion(p.x,p.y,38);
+				}
 				break;
 			}
 		}
