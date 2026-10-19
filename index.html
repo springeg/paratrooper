@@ -26,6 +26,7 @@
 	<span>Score: <b id="score">0</b></span>
 	<span>Level: <b id="level">1</b></span>
 	<span>Turret: <b id="health">100</b>%</span>
+	<button id="pauseBtn">Pause</button>
 	<button id="settingsBtn">Settings</button>
 	<button id="restartBtn">Restart</button>
 </div>
@@ -55,8 +56,8 @@ const settings = document.getElementById("settings");
 
 let W=0,H=0,groundY=0,dpr=1;
 let mouse={x:0,y:0}, firing=false, spaceHeld=false, rightHeld=false;
-let score=0, elapsed=0, gameOver=false, turretHealth=100, lastFire=0;
-let planes=[], ufos=[], bullets=[], enemyBullets=[], troopers=[], particles=[], splatterParticles=[], explosions=[], splats=[];
+let score=0, elapsed=0, gameOver=false, paused=false, turretHealth=100, lastFire=0;
+let planes=[], ufos=[], bullets=[], enemyBullets=[], troopers=[], particles=[], splatterParticles=[], explosions=[], colorExplosions=[], splats=[];
 let planeSpawnTimer=0, ufoSpawnTimer=18, nextPlaneId=1;
 
 const cfg={
@@ -354,7 +355,7 @@ function updateBullets(dt){
 			if(u.dead) continue;
 			if(dist2(b.x,b.y,u.x,u.y)<38*38){
 				b.hit=true;u.hp--;score+=8;spark(b.x,b.y);
-				if(u.hp<=0){u.dead=true;score+=175;explosion(u.x,u.y,28);}
+				if(u.hp<=0){u.dead=true;score+=175;colorExplosion(u.x,u.y,48);}
 				break;
 			}
 		}
@@ -419,6 +420,19 @@ function makeSplat(x){
 	}
 }
 function explosion(x,y,r){explosions.push({x,y,r:3,max:r,t:.45});for(let i=0;i<14;i++)particles.push({x,y,vx:rand(-140,140),vy:rand(-170,80),t:rand(.4,.9)})}
+function colorExplosion(x,y,r){
+	colorExplosions.push({x,y,r:4,max:r,t:.65});
+	for(let i=0;i<24;i++){
+		const a=rand(0,Math.PI*2),s=rand(60,190);
+		particles.push({
+			x,y,
+			vx:Math.cos(a)*s,
+			vy:Math.sin(a)*s-rand(0,70),
+			t:rand(.45,.95),
+			hot:true
+		});
+	}
+}
 function explodeTurret(){
 	if(gameOver)return;
 	explosion(W/2,groundY-25,90);turretHealth=0;gameOver=true;
@@ -469,12 +483,12 @@ function spawnUFO(dt){
 
 function reset(){
 	score=0;elapsed=0;gameOver=false;turretHealth=100;lastFire=0;planeSpawnTimer=0;ufoSpawnTimer=rand(12,22);
-	planes=[];ufos=[];bullets=[];enemyBullets=[];troopers=[];particles=[];splatterParticles=[];explosions=[];splats=[];
+	planes=[];ufos=[];bullets=[];enemyBullets=[];troopers=[];particles=[];splatterParticles=[];explosions=[];colorExplosions=[];splats=[];
 	for(let i=0;i<cfg.startPlanes;i++){const p=new Plane(i%2?1:-1);p.x=rand(0,W);planes.push(p);}
 }
 
 function update(dt,now){
-	if(!gameOver){
+	if(!gameOver && !paused){
 		elapsed+=dt;
 		const d=difficulty(); levelEl.textContent=d.lvl;
 		spawnPlanes(dt,d);
@@ -499,6 +513,8 @@ function update(dt,now){
 	splatterParticles=splatterParticles.filter(p=>p.t>0);
 	for(const e of explosions){e.t-=dt;e.r+=(e.max-e.r)*.23}
 	explosions=explosions.filter(e=>e.t>0);
+	for(const e of colorExplosions){e.t-=dt;e.r+=(e.max-e.r)*.28}
+	colorExplosions=colorExplosions.filter(e=>e.t>0);
 	for(const s of splats)s.t-=dt;
 	splats=splats.filter(s=>s.t>0);
 	scoreEl.textContent=score;
@@ -523,11 +539,26 @@ function draw(){
 	for(const b of enemyBullets){ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);ctx.fill();}
 	ctx.fillStyle="#087f75";
 	for(const p of splatterParticles){ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fill();}
-	for(const p of particles){ctx.globalAlpha=clamp(p.t*2,0,1);ctx.fillStyle="#333";ctx.fillRect(p.x,p.y,3,3);ctx.globalAlpha=1}
+	for(const p of particles){ctx.globalAlpha=clamp(p.t*2,0,1);ctx.fillStyle=p.hot?(p.t>.55?"#ff5a00":"#d7191c"):"#333";ctx.fillRect(p.x,p.y,p.hot?4:3,p.hot?4:3);ctx.globalAlpha=1}
 	for(const e of explosions){
 		ctx.save();ctx.globalAlpha=clamp(e.t*2.3,0,1);ctx.strokeStyle="#333";ctx.lineWidth=4;ctx.beginPath();ctx.arc(e.x,e.y,e.r,0,Math.PI*2);ctx.stroke();
 		for(let i=0;i<10;i++){const a=i*Math.PI*2/10;ctx.beginPath();ctx.moveTo(e.x+Math.cos(a)*e.r*.7,e.y+Math.sin(a)*e.r*.7);ctx.lineTo(e.x+Math.cos(a)*e.r*1.25,e.y+Math.sin(a)*e.r*1.25);ctx.stroke()}
 		ctx.restore();
+	}
+	for(const e of colorExplosions){
+		ctx.save();
+		ctx.globalAlpha=clamp(e.t*1.7,0,1);
+		ctx.fillStyle="#ff7a00";
+		ctx.beginPath();ctx.arc(e.x,e.y,e.r,0,Math.PI*2);ctx.fill();
+		ctx.fillStyle="#d7191c";
+		ctx.beginPath();ctx.arc(e.x,e.y,e.r*.62,0,Math.PI*2);ctx.fill();
+		ctx.fillStyle="#ffb000";
+		ctx.beginPath();ctx.arc(e.x,e.y,e.r*.28,0,Math.PI*2);ctx.fill();
+		ctx.restore();
+	}
+	if(paused && !gameOver){
+		ctx.fillStyle="rgba(255,255,255,.72)";ctx.fillRect(0,0,W,H);
+		ctx.fillStyle="#222";ctx.textAlign="center";ctx.font="700 54px Arial";ctx.fillText("PAUSED",W/2,H/2);
 	}
 	if(gameOver){
 		ctx.fillStyle="rgba(255,255,255,.78)";ctx.fillRect(0,0,W,H);
@@ -553,7 +584,15 @@ addEventListener("mouseup",e=>{if(e.button===2)rightHeld=false;if(e.button===0)f
 addEventListener("keydown",e=>{if(e.code==="Space"){spaceHeld=true;e.preventDefault()}});
 addEventListener("keyup",e=>{if(e.code==="Space"){spaceHeld=false;e.preventDefault()}});
 
-document.getElementById("restartBtn").onclick=reset;
+document.getElementById("pauseBtn").onclick=()=>{
+	paused=!paused;
+	document.getElementById("pauseBtn").textContent=paused?"Resume":"Pause";
+};
+document.getElementById("restartBtn").onclick=()=>{
+	paused=false;
+	document.getElementById("pauseBtn").textContent="Pause";
+	reset();
+};
 document.getElementById("settingsBtn").onclick=()=>settings.showModal();
 document.getElementById("closeSettings").onclick=()=>settings.close();
 
