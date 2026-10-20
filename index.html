@@ -57,7 +57,7 @@ const settings = document.getElementById("settings");
 let W=0,H=0,groundY=0,dpr=1;
 let mouse={x:0,y:0}, firing=false, spaceHeld=false, rightHeld=false;
 let score=0, elapsed=0, gameOver=false, paused=false, turretHealth=100, lastFire=0;
-let planes=[], ufos=[], bullets=[], enemyBullets=[], troopers=[], particles=[], splatterParticles=[], explosions=[], colorExplosions=[], splats=[];
+let planes=[], ufos=[], bullets=[], enemyBullets=[], troopers=[], particles=[], splatterParticles=[], explosions=[], colorExplosions=[], splats=[], trees=[];
 let planeSpawnTimer=0, ufoSpawnTimer=18, nextPlaneId=1;
 
 const cfg={
@@ -74,12 +74,36 @@ function resize(){
 	W=innerWidth; H=innerHeight; groundY=H-72;
 	canvas.width=Math.round(W*dpr); canvas.height=Math.round(H*dpr);
 	ctx.setTransform(dpr,0,0,dpr,0,0);
+	if(!trees.length)makeTrees();
 }
 addEventListener("resize",resize); resize();
 
 function rand(a,b){return a+Math.random()*(b-a)}
 function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
 function dist2(ax,ay,bx,by){const dx=ax-bx,dy=ay-by;return dx*dx+dy*dy}
+function makeTrees(){
+	trees=[];
+	const n=Math.max(7,Math.floor(W/150));
+	for(let i=0;i<n;i++){
+		let x=rand(35,W-35);
+		if(Math.abs(x-W/2)<95){x+=x<W/2?-100:100;}
+		x=clamp(x,35,W-35);
+		trees.push({x,h:rand(36,72),w:rand(22,38)});
+	}
+}
+function emitFlame(x,y,vx=0,vy=0){
+	for(let i=0;i<3;i++){
+		particles.push({
+			x:x+rand(-5,5),
+			y:y+rand(-4,4),
+			vx:vx+rand(-28,28),
+			vy:vy+rand(-25,15),
+			t:rand(.28,.55),
+			hot:true,
+			flame:true
+		});
+	}
+}
 
 class Plane{
 	constructor(dir){
@@ -94,7 +118,11 @@ class Plane{
 	}
 	update(dt,diff){
 		if(this.dead){
-			this.vy+=190*dt; this.y+=this.vy*dt; this.x+=this.dir*this.speed*.55*dt; this.rot+=this.dir*1.8*dt;
+			this.vy+=190*dt;
+			this.y+=this.vy*dt;
+			this.x+=this.dir*this.speed*.55*dt;
+			this.rot+=this.dir*1.8*dt;
+			emitFlame(this.x-this.dir*34,this.y,-this.dir*35,-25);
 			if(this.y>groundY-15){
 				colorExplosion(this.x,this.y,46);
 				explosion(this.x,this.y,34);
@@ -191,30 +219,86 @@ class UFO{
 		this.baseY=rand(90,Math.max(150,H*.32));
 		this.y=this.baseY;
 		this.dir=this.x<0?1:-1;
-		this.speed=rand(85,125);
+		this.speed=rand(80,115);
 		this.age=0;
 		this.hp=6;
 		this.shots=0;
-		this.maxShots=Math.floor(rand(2,5));
-		this.fireT=rand(.8,1.8);
+		this.maxShots=Math.floor(rand(1,4));
+		this.fireT=rand(1.1,2.2);
 		this.phase=rand(0,Math.PI*2);
 		this.dead=false;
+		this.vy=0;
+		this.rot=0;
+		this.target=null;
+		this.abducting=false;
+		this.abductCooldown=rand(1.0,2.2);
 	}
 	update(dt){
 		this.age+=dt;
+
 		if(this.dead){
-			this.remove=true;
+			this.vy+=150*dt;
+			this.y+=this.vy*dt;
+			this.x+=this.dir*this.speed*.25*dt;
+			this.rot+=this.dir*2.4*dt;
+			emitFlame(this.x,this.y+8,-this.dir*20,-15);
+			if(this.y>groundY-10){
+				colorExplosion(this.x,this.y,55);
+				explosion(this.x,this.y,38);
+				this.remove=true;
+			}
 			return;
 		}
-		// Erratic horizontal and vertical motion.
-		this.x+=this.dir*this.speed*dt + Math.sin(this.age*7+this.phase)*28*dt;
-		this.y=this.baseY + Math.sin(this.age*2.6+this.phase)*42 + Math.sin(this.age*7.2)*10;
+
+		this.abductCooldown-=dt;
+
+		if(this.target && (this.target.remove || this.target.dead || ["fall","deadfall","runner","plant","fuse"].includes(this.target.state))){
+			this.target=null;
+			this.abducting=false;
+		}
+
+		if(!this.target && this.abductCooldown<=0){
+			const candidates=troopers.filter(t=>!t.remove && !t.dead && ["jump","chute","walk","stack"].includes(t.state));
+			if(candidates.length){
+				candidates.sort((a,b)=>dist2(this.x,this.y,a.x,a.y)-dist2(this.x,this.y,b.x,b.y));
+				this.target=candidates[0];
+			}
+			this.abductCooldown=rand(1.2,2.4);
+		}
+
+		if(this.target){
+			const hoverX=this.target.x;
+			const hoverY=Math.max(70,this.target.y-85);
+			const dx=hoverX-this.x;
+			const dy=hoverY-this.y;
+			this.x+=clamp(dx,-150*dt,150*dt);
+			this.y+=clamp(dy,-125*dt,125*dt);
+
+			if(Math.abs(dx)<34 && Math.abs(dy)<30){
+				this.abducting=true;
+				this.target.chute=false;
+				this.target.state="abducted";
+				this.target.x+=(this.x-this.target.x)*Math.min(1,dt*5);
+				this.target.y-=95*dt;
+				if(this.target.y<this.y+14){
+					this.target.remove=true;
+					this.target=null;
+					this.abducting=false;
+					this.abductCooldown=rand(2.5,4.5);
+				}
+			}
+		}else{
+			this.x+=this.dir*this.speed*dt + Math.sin(this.age*7+this.phase)*28*dt;
+			this.y=this.baseY + Math.sin(this.age*2.6+this.phase)*42 + Math.sin(this.age*7.2)*10;
+		}
+
 		this.fireT-=dt;
 		if(this.shots<this.maxShots && this.fireT<=0 && this.x>90 && this.x<W-90){
 			this.fireAtTurret();
 			this.shots++;
-			this.fireT=rand(.55,1.25);
+			this.fireT=rand(.8,1.5);
 		}
+
 		if((this.dir>0 && this.x>W+100)||(this.dir<0 && this.x<-100))this.remove=true;
 	}
 	fireAtTurret(){
@@ -226,10 +310,25 @@ class UFO{
 	draw(){
 		ctx.save();
 		ctx.translate(this.x,this.y);
+		ctx.rotate(this.rot);
+
+		if(this.abducting && this.target){
+			ctx.fillStyle="rgba(160,255,210,.18)";
+			ctx.strokeStyle="rgba(90,210,150,.65)";
+			ctx.lineWidth=2;
+			ctx.beginPath();
+			ctx.moveTo(-18,10);
+			ctx.lineTo(this.target.x-this.x-12,this.target.y-this.y);
+			ctx.lineTo(this.target.x-this.x+12,this.target.y-this.y);
+			ctx.lineTo(18,10);
+			ctx.closePath();
+			ctx.fill();
+			ctx.stroke();
+		}
+
 		ctx.lineWidth=3;
 		ctx.strokeStyle="#353535";
 		ctx.fillStyle=this.dead?"#777":"#aaa";
-
 		ctx.beginPath();
 		ctx.ellipse(0,5,34,11,0,0,Math.PI*2);
 		ctx.fill();ctx.stroke();
@@ -269,6 +368,8 @@ class Trooper{
 		}else if(this.state==="deadfall"){
 			this.vy+=470*dt; this.x+=this.vx*dt; this.y+=this.vy*dt;
 			if(this.y>groundY-8){ this.y=groundY-8; makeSplat(this.x); this.remove=true; }
+		}else if(this.state==="abducted"){
+			this.wave+=dt*18;
 		}else if(this.state==="walk"){
 			const tx=W/2 + (this.x<W/2?-72:72);
 			const dx=tx-this.x;
@@ -297,7 +398,7 @@ class Trooper{
 			ctx.beginPath(); ctx.arc(0,-25,17,Math.PI,0); ctx.closePath(); ctx.fill(); ctx.stroke();
 			ctx.beginPath(); ctx.moveTo(-17,-25);ctx.lineTo(0,-8);ctx.moveTo(17,-25);ctx.lineTo(0,-8);ctx.moveTo(0,-42);ctx.lineTo(0,-8);ctx.stroke();
 		}
-		drawPerson(0,0,this.state==="fall",this.wave,this.state==="deadfall");
+		drawPerson(0,0,this.state==="fall"||this.state==="abducted",this.wave,this.state==="deadfall");
 		if(this.state==="fuse"){
 			ctx.fillStyle="#333";ctx.fillRect(-4,5,9,8);
 			ctx.strokeStyle="#d33";ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(4,6);ctx.quadraticCurveTo(10,1,8,-4);ctx.stroke();
@@ -358,9 +459,11 @@ function updateBullets(dt){
 				b.hit=true;u.hp--;score+=8;spark(b.x,b.y);
 				if(u.hp<=0){
 					u.dead=true;
-					u.remove=true;
+					u.vy=20;
+					u.target=null;
+					u.abducting=false;
 					score+=175;
-					colorExplosion(u.x,u.y,48);
+					colorExplosion(u.x,u.y,32);
 				}
 				break;
 			}
@@ -382,7 +485,7 @@ function updateBullets(dt){
 		}
 		if(b.hit) continue;
 		for(const t of troopers){
-			if(t.remove || t.state==="stack" || t.state==="runner" || t.state==="plant" || t.state==="fuse") continue;
+			if(t.remove || t.state==="stack" || t.state==="runner" || t.state==="plant" || t.state==="fuse" || t.state==="abducted") continue;
 			if(t.chute && dist2(b.x,b.y,t.x,t.y-25)<19*19){
 				b.hit=true;t.chute=false;t.state="fall";t.vy=30;t.vx+=rand(-25,25);score+=10;spark(b.x,b.y);break;
 			}
@@ -495,6 +598,7 @@ function spawnUFO(dt){
 function reset(){
 	score=0;elapsed=0;gameOver=false;turretHealth=100;lastFire=0;planeSpawnTimer=0;ufoSpawnTimer=rand(12,22);
 	planes=[];ufos=[];bullets=[];enemyBullets=[];troopers=[];particles=[];splatterParticles=[];explosions=[];colorExplosions=[];splats=[];
+	makeTrees();
 	for(let i=0;i<cfg.startPlanes;i++){const p=new Plane(i%2?1:-1);p.x=rand(0,W);planes.push(p);}
 }
 
@@ -534,11 +638,10 @@ function update(dt,now){
 
 function draw(){
 	ctx.clearRect(0,0,W,H);
-	ctx.fillStyle="#fafaf7";ctx.fillRect(0,0,W,H);
-	// sky guide marks
-	ctx.strokeStyle="#333";ctx.lineWidth=5;ctx.beginPath();ctx.moveTo(0,groundY);ctx.lineTo(W,groundY);ctx.stroke();
-	// simple trees
-	drawTree(120,groundY); drawTree(W-115,groundY);
+	ctx.fillStyle="#86c8f2";ctx.fillRect(0,0,W,groundY);
+	ctx.fillStyle="#8fcf6b";ctx.fillRect(0,groundY,W,H-groundY);
+	ctx.strokeStyle="#333";ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(0,groundY);ctx.lineTo(W,groundY);ctx.stroke();
+	for(const tr of trees)drawTree(tr.x,groundY,tr.h,tr.w);
 	for(const s of splats){ctx.fillStyle="#087f75";ctx.beginPath();ctx.ellipse(s.x,s.y,14,3,0,0,Math.PI*2);ctx.fill();}
 	for(const p of planes)p.draw();
 	for(const u of ufos)u.draw();
@@ -579,10 +682,24 @@ function draw(){
 	}
 }
 
-function drawTree(x,y){
-	ctx.strokeStyle="#333";ctx.lineWidth=5;ctx.fillStyle="white";
-	ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x,y-34);ctx.stroke();
-	ctx.beginPath();ctx.arc(x,y-52,22,0,Math.PI*2);ctx.fill();ctx.stroke();
+function drawTree(x,y,h=50,w=28){
+	ctx.save();
+	ctx.strokeStyle="#6b3f22";
+	ctx.fillStyle="#7a4a28";
+	ctx.lineWidth=2;
+	ctx.fillRect(x-4,y-h*.48,8,h*.48);
+	ctx.strokeRect(x-4,y-h*.48,8,h*.48);
+
+	ctx.fillStyle="#2f8f3a";
+	ctx.strokeStyle="#1f5f29";
+	ctx.beginPath();
+	ctx.arc(x,y-h*.72,w*.62,0,Math.PI*2);
+	ctx.arc(x-w*.42,y-h*.60,w*.48,0,Math.PI*2);
+	ctx.arc(x+w*.42,y-h*.60,w*.48,0,Math.PI*2);
+	ctx.arc(x,y-h*.92,w*.48,0,Math.PI*2);
+	ctx.fill();
+	ctx.stroke();
+	ctx.restore();
 }
 
 canvas.addEventListener("mousemove",e=>{mouse.x=e.clientX;mouse.y=e.clientY});
