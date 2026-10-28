@@ -680,11 +680,20 @@ class Trooper{
 			// position is handled in pyramid layout
 		}else if(this.state==="runner"){
 			const tx=W/2;
+			const ty=groundY-55;
 			const dx=tx-this.x;
+			const dy=ty-this.y;
+			const d=Math.max(1,Math.hypot(dx,dy));
+			const speed=68;
 			this.walkDir=Math.sign(dx)||1;
-			this.x+=this.walkDir*62*dt;
-			this.y-=Math.min(20,Math.abs(dx)*.03)*dt;
-			if(Math.abs(dx)<18){this.state="plant";this.t=0;}
+			this.x+=dx/d*speed*dt;
+			this.y+=dy/d*speed*dt;
+			if(d<7){
+				this.x=tx;
+				this.y=ty;
+				this.state="plant";
+				this.t=0;
+			}
 		}else if(this.state==="plant"){
 			if(this.t>.9){
 				this.state="fuse";
@@ -973,32 +982,51 @@ function explodeTurret(){
 
 function pyramidLayout(){
 	const stackers=troopers.filter(t=>t.state==="stack");
-	const n=stackers.length;
+	const minimum=Math.max(1,cfg.pyramidSize);
 
-	if(n>0){
-		// Choose enough levels to hold all current stackers.
-		// Capacity is triangular: rows, rows-1, ..., 1.
-		const rows=Math.ceil((Math.sqrt(8*n+1)-1)/2);
+	// A conventional pyramid must have complete rows:
+	// rows + (rows-1) + ... + 1.
+	const rows=Math.ceil((Math.sqrt(8*minimum+1)-1)/2);
+	const requiredCount=rows*(rows+1)/2;
 
-		let index=0;
-		for(let level=0;level<rows && index<n;level++){
-			const rowCapacity=rows-level;
-			const rowCount=Math.min(rowCapacity,n-index);
-			const spacing=18;
-			const y=groundY-17-level*15;
+	// Build the pyramid immediately as troops arrive, but only launch the
+	// climber after all rows are complete.
+	const shownCount=Math.min(stackers.length,requiredCount);
+	const spacingX=17;
+	const spacingY=15;
+	const apexX=W/2-48;
 
-			for(let pos=0;pos<rowCount;pos++){
-				const t=stackers[index++];
-				t.x=W/2 + (pos-(rowCount-1)/2)*spacing;
-				t.y=y;
-			}
+	let index=0;
+	for(let level=0;level<rows && index<shownCount;level++){
+		const rowCapacity=rows-level;
+		const rowCount=Math.min(rowCapacity,shownCount-index);
+		const rowCenterX=apexX;
+		const y=groundY-17-level*spacingY;
+
+		for(let pos=0;pos<rowCount;pos++){
+			const t=stackers[index++];
+			t.x=rowCenterX + (pos-(rowCount-1)/2)*spacingX;
+			t.y=y;
 		}
 	}
 
-	const ready=stackers.length>=cfg.pyramidSize && !troopers.some(t=>["runner","plant","fuse"].includes(t.state));
-	if(ready){
-		const candidate=stackers[stackers.length-1];
+	// Extra stackers wait just outside the base rather than being placed
+	// into an incomplete upper layer.
+	for(let i=requiredCount;i<stackers.length;i++){
+		const t=stackers[i];
+		const side=i%2===0?-1:1;
+		t.x=apexX + side*(rows*spacingX*.65 + 18 + Math.floor((i-requiredCount)/2)*8);
+		t.y=groundY-17;
+	}
+
+	const attackInProgress=troopers.some(t=>["runner","plant","fuse"].includes(t.state));
+	if(stackers.length>=requiredCount && !attackInProgress){
+		// The last member of a complete triangular pyramid is the apex troop.
+		const candidate=stackers[requiredCount-1];
 		candidate.state="runner";
+		candidate.x=apexX;
+		candidate.y=groundY-17-(rows-1)*spacingY;
+		candidate.t=0;
 	}
 }
 
