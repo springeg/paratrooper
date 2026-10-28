@@ -231,6 +231,8 @@ class UFO{
 		this.target=null;
 		this.abducting=false;
 		this.abductedTrooper=null;
+		this.abductedDinosaur=null;
+		this.targetType=null;
 		this.abductCooldown=0;
 	}
 	update(dt){
@@ -256,51 +258,68 @@ class UFO{
 
 		this.abductCooldown-=dt;
 
-		if(this.target && (this.target.remove || this.target.dead || ["fall","deadfall","runner","plant","fuse"].includes(this.target.state))){
-			this.target=null;
-			this.abducting=false;
-		}
-
-		if(!this.target && !this.abductedTrooper){
-			const candidates=troopers.filter(t=>!t.remove && !t.dead && ["jump","chute","walk","stack"].includes(t.state));
-			if(candidates.length){
-				candidates.sort((a,b)=>dist2(this.x,this.y,a.x,a.y)-dist2(this.x,this.y,b.x,b.y));
-				this.target=candidates[0];
-				this.abductCooldown=0;
-			}
-		}
-
 		if(this.target){
+			const isDino=this.targetType==="dinosaur";
 			const hoverX=this.target.x;
-			const hoverY=Math.max(70,this.target.y-85);
+			const hoverY=Math.max(70,this.target.y-(isDino?105:85));
 			const dx=hoverX-this.x;
 			const dy=hoverY-this.y;
 
-			// Aggressive but smooth pursuit at high speed.
 			const mag=Math.max(1,Math.hypot(dx,dy));
-			const pursuitSpeed=320;
+			const pursuitSpeed=isDino?250:320;
 			const desiredVX=dx/mag*pursuitSpeed;
 			const desiredVY=dy/mag*pursuitSpeed;
-			this.seekVX=(this.seekVX||0)+(desiredVX-(this.seekVX||0))*Math.min(1,dt*5.5);
-			this.seekVY=(this.seekVY||0)+(desiredVY-(this.seekVY||0))*Math.min(1,dt*5.5);
+			this.seekVX=(this.seekVX||0)+(desiredVX-(this.seekVX||0))*Math.min(1,dt*(isDino?3.8:5.5));
+			this.seekVY=(this.seekVY||0)+(desiredVY-(this.seekVY||0))*Math.min(1,dt*(isDino?3.8:5.5));
 			this.x+=this.seekVX*dt;
 			this.y+=this.seekVY*dt;
 
-			if(Math.abs(dx)<34 && Math.abs(dy)<30){
+			if(Math.abs(dx)<40 && Math.abs(dy)<34){
 				this.abducting=true;
-				this.target.chute=false;
-				this.target.state="abducted";
-				this.target.x+=(this.x-this.target.x)*Math.min(1,dt*4);
-				this.target.y-=115*dt;
-				if(this.target.y<this.y+18){
-					this.abductedTrooper=this.target;
-					this.abductedTrooper.x=this.x;
-					this.abductedTrooper.y=this.y+30;
-					this.target=null;
-					this.abducting=false;
-					this.fleeDir=this.x<W/2?-1:1;
-					this.abductCooldown=0;
+
+				if(isDino){
+					this.target.abducted=true;
+					this.target.target=null;
+					const liftPulse=Math.sin(this.age*18);
+					const liftRate=liftPulse>-.1?34:8;
+					this.target.x+=(this.x-this.target.x)*Math.min(1,dt*2.2);
+					this.target.y-=liftRate*dt;
+					if(this.target.y<this.y+42){
+						this.abductedDinosaur=this.target;
+						this.abductedDinosaur.abducted=true;
+						this.target=null;
+						this.targetType=null;
+						this.abducting=false;
+						this.fleeDir=this.x<W/2?-1:1;
+					}
+				}else{
+					this.target.chute=false;
+					this.target.state="abducted";
+					this.target.x+=(this.x-this.target.x)*Math.min(1,dt*4);
+					this.target.y-=115*dt;
+					if(this.target.y<this.y+18){
+						this.abductedTrooper=this.target;
+						this.abductedTrooper.x=this.x;
+						this.abductedTrooper.y=this.y+30;
+						this.target=null;
+						this.targetType=null;
+						this.abducting=false;
+						this.fleeDir=this.x<W/2?-1:1;
+						this.abductCooldown=0;
+					}
 				}
+			}		}else if(this.abductedDinosaur && !this.abductedDinosaur.remove){
+			const escapeDir=this.fleeDir||this.dir;
+			const stutter=Math.sin(this.age*16)>0.15?1:.18;
+			this.x+=escapeDir*115*stutter*dt;
+			this.y-=22*stutter*dt;
+			this.y+=Math.sin(this.age*11)*8*dt;
+			this.abductedDinosaur.x=this.x;
+			this.abductedDinosaur.y=this.y+48;
+			if((escapeDir>0 && this.x>W+120)||(escapeDir<0 && this.x<-120)||this.y<-90){
+				this.abductedDinosaur.remove=true;
+				this.abductedDinosaur=null;
+				this.remove=true;
 			}
 		}else if(this.abductedTrooper && !this.abductedTrooper.remove){
 			const escapeDir=this.fleeDir||this.dir;
@@ -339,8 +358,9 @@ class UFO{
 			ctx.lineWidth=2;
 			ctx.beginPath();
 			ctx.moveTo(-18,10);
-			ctx.lineTo(this.target.x-this.x-12,this.target.y-this.y);
-			ctx.lineTo(this.target.x-this.x+12,this.target.y-this.y);
+			const beamHalf=this.targetType==="dinosaur"?28:12;
+			ctx.lineTo(this.target.x-this.x-beamHalf,this.target.y-this.y);
+			ctx.lineTo(this.target.x-this.x+beamHalf,this.target.y-this.y);
 			ctx.lineTo(18,10);
 			ctx.closePath();
 			ctx.fill();
@@ -384,6 +404,8 @@ class Dinosaur{
 		this.roamTarget=rand(70,W-70);
 		this.age=0;
 		this.ate=false;
+		this.exiting=false;
+		this.abducted=false;
 		this.chewTimer=0;
 	}
 	update(dt){
@@ -391,6 +413,9 @@ class Dinosaur{
 		if(this.dead){
 			this.y+=90*dt;
 			if(this.age>1.1)this.remove=true;
+			return;
+		}
+		if(this.abducted){
 			return;
 		}
 
@@ -418,13 +443,15 @@ class Dinosaur{
 				this.victim.remove=true;
 				this.victim=null;
 				this.ate=true;
-				this.roamTarget=this.dir>0?W+110:-110;
-				this.speed=rand(105,125);
+				this.exiting=true;
+				this.dir=this.x<W/2?-1:1;
+				this.roamTarget=this.dir>0?W+140:-140;
+				this.speed=rand(112,132);
 			}
 			return;
 		}
 
-		const candidates=troopers.filter(t=>!t.remove && !t.dead && ["walk","stack"].includes(t.state));
+		const candidates=this.exiting?[]:troopers.filter(t=>!t.remove && !t.dead && ["walk","stack"].includes(t.state));
 		if(candidates.length){
 			candidates.sort((a,b)=>Math.abs(a.x-this.x)-Math.abs(b.x-this.x));
 			this.target=candidates[0];
@@ -433,7 +460,8 @@ class Dinosaur{
 		}
 
 		let tx=this.target?this.target.x:this.roamTarget;
-		if(!this.target && Math.abs(tx-this.x)<18){
+		if(this.exiting)tx=this.roamTarget;
+		if(!this.target && !this.exiting && Math.abs(tx-this.x)<18){
 			this.roamTarget=rand(70,W-70);
 			tx=this.roamTarget;
 		}
@@ -514,12 +542,20 @@ class Dinosaur{
 			ctx.fill();
 		}
 
-		// Powerful hind legs.
+		// Alternating hind-leg stride.
+		const stride=this.abducted?0:Math.sin(this.age*10)*9;
 		ctx.strokeStyle="#21351d";
 		ctx.lineWidth=6;
 		ctx.beginPath();
-		ctx.moveTo(-10,-4);ctx.lineTo(-14,12);ctx.lineTo(-24,18);
-		ctx.moveTo(12,-5);ctx.lineTo(17,11);ctx.lineTo(29,16);
+		ctx.moveTo(-10,-4);ctx.lineTo(-15+stride*.35,10);ctx.lineTo(-27+stride,18);
+		ctx.moveTo(12,-5);ctx.lineTo(17-stride*.35,10);ctx.lineTo(29-stride,18);
+		ctx.stroke();
+
+		// Feet.
+		ctx.lineWidth=3;
+		ctx.beginPath();
+		ctx.moveTo(-27+stride,18);ctx.lineTo(-33+stride,18);
+		ctx.moveTo(29-stride,18);ctx.lineTo(35-stride,18);
 		ctx.stroke();
 
 		// Small forearms.
@@ -670,7 +706,17 @@ function updateBullets(dt){
 						u.abductedTrooper.chute=false;
 						u.abductedTrooper=null;
 					}
+					if(u.target && u.targetType==="dinosaur" && !u.target.remove){
+						u.target.abducted=false;
+						u.target.y=Math.min(u.target.y,groundY-20);
+					}
+					if(u.abductedDinosaur && !u.abductedDinosaur.remove){
+						u.abductedDinosaur.abducted=false;
+						u.abductedDinosaur.y=Math.min(u.abductedDinosaur.y,groundY-20);
+						u.abductedDinosaur=null;
+					}
 					u.target=null;
+					u.targetType=null;
 					u.abducting=false;
 					score+=175;
 					colorExplosion(u.x,u.y,32);
