@@ -693,6 +693,8 @@ class Trooper{
 					if(other!==this && !other.remove && !other.dead && ["walk","stack"].includes(other.state)){
 						other.state="flee";
 						other.fleeDir=other.x<W/2?-1:1;
+						other.y=groundY-20;
+						other.x+=rand(-10,10);
 						other.t=0;
 					}
 				}
@@ -718,7 +720,7 @@ class Trooper{
 			ctx.beginPath(); ctx.moveTo(-17,-25);ctx.lineTo(0,-8);ctx.moveTo(17,-25);ctx.lineTo(0,-8);ctx.moveTo(0,-42);ctx.lineTo(0,-8);ctx.stroke();
 		}
 		drawPerson(0,0,this.state==="fall"||this.state==="abducted"||this.state==="eaten",this.wave,this.state==="deadfall");
-		if(this.state==="plant" || this.state==="fuse"){
+		if(!turretDestroyed && (this.state==="plant" || this.state==="fuse")){
 			ctx.fillStyle="#c5161d";
 			ctx.strokeStyle="#7a0d12";
 			ctx.lineWidth=2;
@@ -938,6 +940,13 @@ function colorExplosion(x,y,r){
 }
 function explodeTurret(){
 	if(gameOver)return;
+
+	for(const t of troopers){
+		if(t.state==="plant" || t.state==="fuse"){
+			t.remove=true;
+		}
+	}
+
 	turretDestroyed=true;
 	turretHealth=0;
 
@@ -964,18 +973,28 @@ function explodeTurret(){
 
 function pyramidLayout(){
 	const stackers=troopers.filter(t=>t.state==="stack");
-	for(let i=0;i<stackers.length;i++){
-		const t=stackers[i];
-		let remaining=i,row=0;
-		while(remaining>row+1){remaining-=row+2;row++;}
-		const count=row+2;
-		const side=i%2===0?-1:1;
-		const slot=Math.floor(i/2);
-		const level=Math.floor((Math.sqrt(8*slot+1)-1)/2);
-		const pos=slot-level*(level+1)/2;
-		t.x=W/2 + side*(56-level*7 + pos*11);
-		t.y=groundY-17-level*14;
+	const n=stackers.length;
+
+	if(n>0){
+		// Choose enough levels to hold all current stackers.
+		// Capacity is triangular: rows, rows-1, ..., 1.
+		const rows=Math.ceil((Math.sqrt(8*n+1)-1)/2);
+
+		let index=0;
+		for(let level=0;level<rows && index<n;level++){
+			const rowCapacity=rows-level;
+			const rowCount=Math.min(rowCapacity,n-index);
+			const spacing=18;
+			const y=groundY-17-level*15;
+
+			for(let pos=0;pos<rowCount;pos++){
+				const t=stackers[index++];
+				t.x=W/2 + (pos-(rowCount-1)/2)*spacing;
+				t.y=y;
+			}
+		}
 	}
+
 	const ready=stackers.length>=cfg.pyramidSize && !troopers.some(t=>["runner","plant","fuse"].includes(t.state));
 	if(ready){
 		const candidate=stackers[stackers.length-1];
