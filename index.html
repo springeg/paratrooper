@@ -58,8 +58,8 @@ const settings = document.getElementById("settings");
 let W=0,H=0,groundY=0,dpr=1;
 let mouse={x:0,y:0}, firing=false, spaceHeld=false, rightHeld=false;
 let score=0, elapsed=0, gameOver=false, paused=false, turretHealth=100, lastFire=0;
-let planes=[], ufos=[], bullets=[], enemyBullets=[], troopers=[], particles=[], splatterParticles=[], explosions=[], colorExplosions=[], splats=[], trees=[];
-let planeSpawnTimer=0, ufoSpawnTimer=18, nextPlaneId=1;
+let planes=[], ufos=[], dinosaurs=[], bullets=[], enemyBullets=[], troopers=[], particles=[], splatterParticles=[], explosions=[], colorExplosions=[], splats=[], trees=[];
+let planeSpawnTimer=0, ufoSpawnTimer=18, dinosaurSpawnTimer=30, nextPlaneId=1;
 
 const cfg={
 	fireInterval:110,
@@ -221,7 +221,7 @@ class UFO{
 		this.baseY=rand(90,Math.max(150,H*.32));
 		this.y=this.baseY;
 		this.dir=this.x<0?1:-1;
-		this.speed=rand(80,115);
+		this.speed=rand(135,175);
 		this.age=0;
 		this.hp=cfg.ufoHP;
 		this.phase=rand(0,Math.PI*2);
@@ -231,7 +231,7 @@ class UFO{
 		this.target=null;
 		this.abducting=false;
 		this.abductedTrooper=null;
-		this.abductCooldown=rand(1.0,2.2);
+		this.abductCooldown=rand(.15,.45);
 	}
 	update(dt){
 		this.age+=dt;
@@ -261,13 +261,13 @@ class UFO{
 			this.abducting=false;
 		}
 
-		if(!this.target && this.abductCooldown<=0){
+		if(!this.target && !this.abductedTrooper && this.abductCooldown<=0){
 			const candidates=troopers.filter(t=>!t.remove && !t.dead && ["jump","chute","walk","stack"].includes(t.state));
 			if(candidates.length){
 				candidates.sort((a,b)=>dist2(this.x,this.y,a.x,a.y)-dist2(this.x,this.y,b.x,b.y));
 				this.target=candidates[0];
 			}
-			this.abductCooldown=rand(1.2,2.4);
+			this.abductCooldown=rand(.15,.5);
 		}
 
 		if(this.target){
@@ -277,12 +277,12 @@ class UFO{
 			const dy=hoverY-this.y;
 
 			// Smooth pursuit: accelerate toward the target with a capped velocity.
-			this.seekVX=(this.seekVX||0)+clamp(dx*.9,-110,110)*dt;
-			this.seekVY=(this.seekVY||0)+clamp(dy*.9,-95,95)*dt;
+			this.seekVX=(this.seekVX||0)+clamp(dx*1.6,-190,190)*dt;
+			this.seekVY=(this.seekVY||0)+clamp(dy*1.6,-165,165)*dt;
 			this.seekVX*=.94;
 			this.seekVY*=.94;
-			this.seekVX=clamp(this.seekVX,-135,135);
-			this.seekVY=clamp(this.seekVY,-115,115);
+			this.seekVX=clamp(this.seekVX,-220,220);
+			this.seekVY=clamp(this.seekVY,-185,185);
 			this.x+=this.seekVX*dt;
 			this.y+=this.seekVY*dt;
 
@@ -291,7 +291,7 @@ class UFO{
 				this.target.chute=false;
 				this.target.state="abducted";
 				this.target.x+=(this.x-this.target.x)*Math.min(1,dt*4);
-				this.target.y-=80*dt;
+				this.target.y-=115*dt;
 				if(this.target.y<this.y+18){
 					this.abductedTrooper=this.target;
 					this.abductedTrooper.x=this.x;
@@ -302,8 +302,8 @@ class UFO{
 				}
 			}
 		}else if(this.abductedTrooper && !this.abductedTrooper.remove){
-			this.x+=this.dir*this.speed*.85*dt;
-			this.y+=Math.sin(this.age*2.3+this.phase)*22*dt;
+			this.x+=this.dir*this.speed*1.35*dt;
+			this.y+=Math.sin(this.age*2.3+this.phase)*30*dt;
 			this.abductedTrooper.x=this.x;
 			this.abductedTrooper.y=this.y+30;
 			if((this.dir>0 && this.x>W+100)||(this.dir<0 && this.x<-100)){
@@ -363,6 +363,103 @@ class UFO{
 			ctx.arc(lx,8,2.5,0,Math.PI*2);
 			ctx.fill();
 		}
+		ctx.restore();
+	}
+}
+
+class Dinosaur{
+	constructor(){
+		this.dir=Math.random()<.5?1:-1;
+		this.x=this.dir>0?-70:W+70;
+		this.y=groundY-18;
+		this.speed=rand(58,78);
+		this.hp=10;
+		this.dead=false;
+		this.remove=false;
+		this.target=null;
+		this.roamTarget=rand(60,W-60);
+		this.age=0;
+		this.ate=false;
+	}
+	update(dt){
+		this.age+=dt;
+		if(this.dead){
+			this.y+=90*dt;
+			if(this.age>1.1)this.remove=true;
+			return;
+		}
+
+		const candidates=troopers.filter(t=>!t.remove && !t.dead && ["walk","stack"].includes(t.state));
+		if(candidates.length){
+			candidates.sort((a,b)=>Math.abs(a.x-this.x)-Math.abs(b.x-this.x));
+			this.target=candidates[0];
+		}else{
+			this.target=null;
+		}
+
+		let tx=this.target?this.target.x:this.roamTarget;
+		if(!this.target && Math.abs(tx-this.x)<18){
+			this.roamTarget=rand(60,W-60);
+			tx=this.roamTarget;
+		}
+
+		const dx=tx-this.x;
+		this.dir=Math.sign(dx)||this.dir;
+		this.x+=this.dir*this.speed*dt;
+		this.y=groundY-18+Math.sin(this.age*8)*1.5;
+
+		if(this.target && Math.abs(dx)<24){
+			this.target.remove=true;
+			this.ate=true;
+			this.target=null;
+			this.roamTarget=this.dir>0?W+90:-90;
+			this.speed=rand(88,108);
+		}
+
+		if(this.ate && (this.x<-100 || this.x>W+100))this.remove=true;
+	}
+	draw(){
+		ctx.save();
+		ctx.translate(this.x,this.y);
+		ctx.scale(this.dir,1);
+		ctx.lineWidth=3;
+		ctx.strokeStyle="#24361f";
+		ctx.fillStyle=this.dead?"#6f745f":"#6f9c45";
+
+		ctx.beginPath();
+		ctx.ellipse(0,-10,30,16,0,0,Math.PI*2);
+		ctx.fill();ctx.stroke();
+
+		ctx.beginPath();
+		ctx.moveTo(18,-16);
+		ctx.lineTo(38,-25);
+		ctx.lineTo(45,-18);
+		ctx.lineTo(30,-7);
+		ctx.closePath();
+		ctx.fill();ctx.stroke();
+
+		ctx.beginPath();
+		ctx.moveTo(-26,-11);
+		ctx.lineTo(-48,-22);
+		ctx.lineTo(-35,-5);
+		ctx.closePath();
+		ctx.fill();ctx.stroke();
+
+		ctx.beginPath();
+		ctx.moveTo(-10,2);ctx.lineTo(-14,16);
+		ctx.moveTo(12,2);ctx.lineTo(16,16);
+		ctx.stroke();
+
+		ctx.fillStyle="#111";
+		ctx.beginPath();ctx.arc(33,-21,2.5,0,Math.PI*2);ctx.fill();
+
+		ctx.strokeStyle="#eee";
+		ctx.lineWidth=2;
+		ctx.beginPath();
+		ctx.moveTo(39,-15);ctx.lineTo(34,-11);
+		ctx.moveTo(43,-16);ctx.lineTo(38,-12);
+		ctx.stroke();
+
 		ctx.restore();
 	}
 }
@@ -500,6 +597,22 @@ function updateBullets(dt){
 			}
 		}
 		if(b.hit) continue;
+		for(const d of dinosaurs){
+			if(d.dead) continue;
+			if(Math.abs(b.x-d.x)<42 && Math.abs(b.y-d.y)<24){
+				b.hit=true;
+				d.hp--;
+				score+=4;
+				spark(b.x,b.y);
+				if(d.hp<=0){
+					d.dead=true;
+					score+=125;
+					explosion(d.x,d.y,26);
+				}
+				break;
+			}
+		}
+		if(b.hit) continue;
 		for(const p of planes){
 			if(p.dead) continue;
 			if(Math.abs(b.x-p.x)<55 && Math.abs(b.y-p.y)<18){
@@ -622,13 +735,21 @@ function spawnUFO(dt){
 	ufoSpawnTimer-=dt;
 	if(ufoSpawnTimer<=0 && ufos.length===0){
 		ufos.push(new UFO());
-		ufoSpawnTimer=rand(22,42);
+		ufoSpawnTimer=rand(18,34);
+	}
+}
+
+function spawnDinosaur(dt){
+	dinosaurSpawnTimer-=dt;
+	if(dinosaurSpawnTimer<=0 && dinosaurs.length===0){
+		dinosaurs.push(new Dinosaur());
+		dinosaurSpawnTimer=rand(28,50);
 	}
 }
 
 function reset(){
-	score=0;elapsed=0;gameOver=false;turretHealth=100;lastFire=0;planeSpawnTimer=0;ufoSpawnTimer=rand(12,22);
-	planes=[];ufos=[];bullets=[];enemyBullets=[];troopers=[];particles=[];splatterParticles=[];explosions=[];colorExplosions=[];splats=[];
+	score=0;elapsed=0;gameOver=false;turretHealth=100;lastFire=0;planeSpawnTimer=0;ufoSpawnTimer=rand(10,18);dinosaurSpawnTimer=rand(20,36);
+	planes=[];ufos=[];dinosaurs=[];bullets=[];enemyBullets=[];troopers=[];particles=[];splatterParticles=[];explosions=[];colorExplosions=[];splats=[];
 	makeTrees();
 	for(let i=0;i<cfg.startPlanes;i++){const p=new Plane(i%2?1:-1);p.x=rand(0,W);planes.push(p);}
 }
@@ -639,14 +760,17 @@ function update(dt,now){
 		const d=difficulty(); levelEl.textContent=d.lvl;
 		spawnPlanes(dt,d);
 		spawnUFO(dt);
+		spawnDinosaur(dt);
 		for(const p of planes)p.update(dt,d.factor);
 		for(const u of ufos)u.update(dt);
+		for(const dino of dinosaurs)dino.update(dt);
 		for(const t of troopers)t.update(dt);
 		pyramidLayout();
 		updateBullets(dt);
 		if(firing||spaceHeld||rightHeld)shoot(now);
 		planes=planes.filter(p=>!p.remove);
 		ufos=ufos.filter(u=>!u.remove);
+		dinosaurs=dinosaurs.filter(d=>!d.remove);
 		troopers=troopers.filter(t=>!t.remove);
 	}
 	for(const p of particles){p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=240*dt;p.t-=dt}
@@ -675,6 +799,7 @@ function draw(){
 	for(const s of splats){ctx.fillStyle="#087f75";ctx.beginPath();ctx.ellipse(s.x,s.y,14,3,0,0,Math.PI*2);ctx.fill();}
 	for(const p of planes)p.draw();
 	for(const u of ufos)u.draw();
+	for(const dino of dinosaurs)dino.draw();
 	for(const t of troopers)t.draw();
 	drawTurret();
 	ctx.fillStyle="#333";
