@@ -37,7 +37,8 @@
 	<label>Fire interval (ms) <output id="fireOut"></output><input id="fire" type="range" min="45" max="350" step="5"></label>
 	<label>Base drop interval (ms) <output id="dropOut"></output><input id="drop" type="range" min="350" max="2600" step="50"></label>
 	<label>Starting planes <output id="planesOut"></output><input id="planes" type="range" min="1" max="8" step="1"></label>
-	<label>Plane hit points <output id="hpOut"></output><input id="hp" type="range" min="1" max="10" step="1"></label>
+	<label>Plane hit points <output id="hpOut"></output><input id="hp" type="range" min="1" max="20" step="1"></label>
+	<label>UFO hit points <output id="ufoHpOut"></output><input id="ufoHp" type="range" min="1" max="20" step="1"></label>
 	<label>Pyramid size <output id="pyrOut"></output><input id="pyr" type="range" min="4" max="14" step="1"></label>
 	<label>Difficulty growth <output id="diffOut"></output><input id="diff" type="range" min="0" max="2" step=".1"></label>
 	<div class="small">Changes take effect immediately. Difficulty increases plane speed, active plane count, and paratrooper drop frequency over time.</div>
@@ -65,6 +66,7 @@ const cfg={
 	dropInterval:1250,
 	startPlanes:2,
 	planeHP:4,
+	ufoHP:6,
 	pyramidSize:7,
 	difficulty:1
 };
@@ -221,16 +223,14 @@ class UFO{
 		this.dir=this.x<0?1:-1;
 		this.speed=rand(80,115);
 		this.age=0;
-		this.hp=6;
-		this.shots=0;
-		this.maxShots=Math.floor(rand(1,4));
-		this.fireT=rand(1.1,2.2);
+		this.hp=cfg.ufoHP;
 		this.phase=rand(0,Math.PI*2);
 		this.dead=false;
 		this.vy=0;
 		this.rot=0;
 		this.target=null;
 		this.abducting=false;
+		this.abductedTrooper=null;
 		this.abductCooldown=rand(1.0,2.2);
 	}
 	update(dt){
@@ -242,6 +242,10 @@ class UFO{
 			this.x+=this.dir*this.speed*.25*dt;
 			this.rot+=this.dir*2.4*dt;
 			emitFlame(this.x,this.y+8,-this.dir*20,-15);
+			if(this.abductedTrooper && !this.abductedTrooper.remove){
+				this.abductedTrooper.x=this.x;
+				this.abductedTrooper.y=this.y+30;
+			}
 			if(this.y>groundY-10){
 				colorExplosion(this.x,this.y,55);
 				explosion(this.x,this.y,38);
@@ -271,41 +275,55 @@ class UFO{
 			const hoverY=Math.max(70,this.target.y-85);
 			const dx=hoverX-this.x;
 			const dy=hoverY-this.y;
-			this.x+=clamp(dx,-150*dt,150*dt);
-			this.y+=clamp(dy,-125*dt,125*dt);
+
+			// Smooth pursuit: accelerate toward the target with a capped velocity.
+			this.seekVX=(this.seekVX||0)+clamp(dx*.9,-110,110)*dt;
+			this.seekVY=(this.seekVY||0)+clamp(dy*.9,-95,95)*dt;
+			this.seekVX*=.94;
+			this.seekVY*=.94;
+			this.seekVX=clamp(this.seekVX,-135,135);
+			this.seekVY=clamp(this.seekVY,-115,115);
+			this.x+=this.seekVX*dt;
+			this.y+=this.seekVY*dt;
 
 			if(Math.abs(dx)<34 && Math.abs(dy)<30){
 				this.abducting=true;
 				this.target.chute=false;
 				this.target.state="abducted";
-				this.target.x+=(this.x-this.target.x)*Math.min(1,dt*5);
-				this.target.y-=95*dt;
-				if(this.target.y<this.y+14){
-					this.target.remove=true;
+				this.target.x+=(this.x-this.target.x)*Math.min(1,dt*4);
+				this.target.y-=80*dt;
+				if(this.target.y<this.y+18){
+					this.abductedTrooper=this.target;
+					this.abductedTrooper.x=this.x;
+					this.abductedTrooper.y=this.y+30;
 					this.target=null;
 					this.abducting=false;
 					this.abductCooldown=rand(2.5,4.5);
 				}
 			}
+		}else if(this.abductedTrooper && !this.abductedTrooper.remove){
+			this.x+=this.dir*this.speed*.85*dt;
+			this.y+=Math.sin(this.age*2.3+this.phase)*22*dt;
+			this.abductedTrooper.x=this.x;
+			this.abductedTrooper.y=this.y+30;
+			if((this.dir>0 && this.x>W+100)||(this.dir<0 && this.x<-100)){
+				this.abductedTrooper.remove=true;
+				this.abductedTrooper=null;
+				this.remove=true;
+			}
 		}else{
-			this.x+=this.dir*this.speed*dt + Math.sin(this.age*7+this.phase)*28*dt;
-			this.y=this.baseY + Math.sin(this.age*2.6+this.phase)*42 + Math.sin(this.age*7.2)*10;
-		}
-
-		this.fireT-=dt;
-		if(this.shots<this.maxShots && this.fireT<=0 && this.x>90 && this.x<W-90){
-			this.fireAtTurret();
-			this.shots++;
-			this.fireT=rand(.8,1.5);
+			this.seekVX=(this.seekVX||this.dir*this.speed);
+			this.seekVY=(this.seekVY||0);
+			const desiredVX=this.dir*this.speed + Math.sin(this.age*2.1+this.phase)*28;
+			const desiredVY=Math.sin(this.age*1.7+this.phase)*45;
+			this.seekVX+=(desiredVX-this.seekVX)*Math.min(1,dt*1.8);
+			this.seekVY+=(desiredVY-this.seekVY)*Math.min(1,dt*1.8);
+			this.x+=this.seekVX*dt;
+			this.y+=this.seekVY*dt;
+			this.y=clamp(this.y,65,Math.max(120,groundY-140));
 		}
 
 		if((this.dir>0 && this.x>W+100)||(this.dir<0 && this.x<-100))this.remove=true;
-	}
-	fireAtTurret(){
-		const tx=W/2,ty=groundY-28;
-		const a=Math.atan2(ty-this.y,tx-this.x)+rand(-.055,.055);
-		const speed=260;
-		enemyBullets.push({x:this.x,y:this.y+10,vx:Math.cos(a)*speed,vy:Math.sin(a)*speed,r:4});
 	}
 	draw(){
 		ctx.save();
@@ -460,6 +478,19 @@ function updateBullets(dt){
 				if(u.hp<=0){
 					u.dead=true;
 					u.vy=20;
+					if(u.target && u.target.state==="abducted"){
+						u.target.state="fall";
+						u.target.vy=25;
+						u.target.vx=rand(-20,20);
+						u.target.chute=false;
+					}
+					if(u.abductedTrooper && !u.abductedTrooper.remove){
+						u.abductedTrooper.state="fall";
+						u.abductedTrooper.vy=25;
+						u.abductedTrooper.vx=rand(-20,20);
+						u.abductedTrooper.chute=false;
+						u.abductedTrooper=null;
+					}
 					u.target=null;
 					u.abducting=false;
 					score+=175;
@@ -613,7 +644,6 @@ function update(dt,now){
 		for(const t of troopers)t.update(dt);
 		pyramidLayout();
 		updateBullets(dt);
-		updateEnemyBullets(dt);
 		if(firing||spaceHeld||rightHeld)shoot(now);
 		planes=planes.filter(p=>!p.remove);
 		ufos=ufos.filter(u=>!u.remove);
@@ -649,8 +679,6 @@ function draw(){
 	drawTurret();
 	ctx.fillStyle="#333";
 	for(const b of bullets){ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);ctx.fill();}
-	ctx.fillStyle="#555";
-	for(const b of enemyBullets){ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);ctx.fill();}
 	ctx.fillStyle="#087f75";
 	for(const p of splatterParticles){ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fill();}
 	for(const p of particles){ctx.globalAlpha=clamp(p.t*2,0,1);ctx.fillStyle=p.hot?(p.t>.55?"#ff5a00":"#d7191c"):"#333";ctx.fillRect(p.x,p.y,p.hot?4:3,p.hot?4:3);ctx.globalAlpha=1}
@@ -729,6 +757,7 @@ const binds=[
 	["drop","dropOut","dropInterval",v=>v+" ms"],
 	["planes","planesOut","startPlanes",v=>v],
 	["hp","hpOut","planeHP",v=>v],
+	["ufoHp","ufoHpOut","ufoHP",v=>v],
 	["pyr","pyrOut","pyramidSize",v=>v],
 	["diff","diffOut","difficulty",v=>Number(v).toFixed(1)+"×"]
 ];
