@@ -261,13 +261,13 @@ class UFO{
 		// Drop invalid targets and immediately look for another one.
 		if(this.target){
 			if(this.targetType==="trooper"){
-				if(this.target.remove || this.target.dead || ["fall","deadfall","runner","plant","fuse","eaten","abducted"].includes(this.target.state)){
+				if(this.target.remove || this.target.dead || ["fall","deadfall","runner","plant","fuse","eaten"].includes(this.target.state)){
 					this.target=null;
 					this.targetType=null;
 					this.abducting=false;
 				}
 			}else if(this.targetType==="dinosaur"){
-				if(this.target.remove || this.target.dead || this.target.abducted){
+				if(this.target.remove || this.target.dead || this.target.victim || this.target.ate){
 					this.target=null;
 					this.targetType=null;
 					this.abducting=false;
@@ -309,44 +309,67 @@ class UFO{
 
 		if(this.target){
 			const isDino=this.targetType==="dinosaur";
-			const hoverX=this.target.x;
-			const hoverY=Math.max(70,this.target.y-(isDino?105:85));
-			const dx=hoverX-this.x;
-			const dy=hoverY-this.y;
+			const alreadyLifting=isDino?this.target.abducted:this.target.state==="abducted";
 
-			const mag=Math.max(1,Math.hypot(dx,dy));
-			const pursuitSpeed=isDino?250:320;
-			const desiredVX=dx/mag*pursuitSpeed;
-			const desiredVY=dy/mag*pursuitSpeed;
-			this.seekVX=(this.seekVX||0)+(desiredVX-(this.seekVX||0))*Math.min(1,dt*(isDino?3.8:5.5));
-			this.seekVY=(this.seekVY||0)+(desiredVY-(this.seekVY||0))*Math.min(1,dt*(isDino?3.8:5.5));
-			this.x+=this.seekVX*dt;
-			this.y+=this.seekVY*dt;
+			if(!alreadyLifting){
+				// Stage 1: fly to a stable hover point above the selected target.
+				const hoverX=this.target.x;
+				const hoverY=Math.max(70,this.target.y-(isDino?105:85));
+				const dx=hoverX-this.x;
+				const dy=hoverY-this.y;
+				const mag=Math.max(1,Math.hypot(dx,dy));
+				const pursuitSpeed=isDino?250:320;
+				const desiredVX=dx/mag*pursuitSpeed;
+				const desiredVY=dy/mag*pursuitSpeed;
 
-			if(Math.abs(dx)<40 && Math.abs(dy)<34){
+				this.seekVX=(this.seekVX||0)+(desiredVX-(this.seekVX||0))*Math.min(1,dt*(isDino?3.8:5.5));
+				this.seekVY=(this.seekVY||0)+(desiredVY-(this.seekVY||0))*Math.min(1,dt*(isDino?3.8:5.5));
+				this.x+=this.seekVX*dt;
+				this.y+=this.seekVY*dt;
+
+				if(Math.abs(dx)<40 && Math.abs(dy)<34){
+					this.abducting=true;
+					this.seekVX*=.2;
+					this.seekVY*=.2;
+
+					if(isDino){
+						this.target.abducted=true;
+						this.target.target=null;
+					}else{
+						this.target.chute=false;
+						this.target.state="abducted";
+						this.target.vx=0;
+						this.target.vy=0;
+					}
+				}
+			}else{
+				// Stage 2: hold the UFO nearly stationary and pull the target into the beam.
 				this.abducting=true;
+				this.seekVX=(this.seekVX||0)*Math.pow(.08,dt);
+				this.seekVY=(this.seekVY||0)*Math.pow(.08,dt);
+				this.x+=this.seekVX*dt;
+				this.y+=this.seekVY*dt;
 
 				if(isDino){
-					this.target.abducted=true;
-					this.target.target=null;
 					const liftPulse=Math.sin(this.age*18);
 					const liftRate=liftPulse>-.1?34:8;
-					this.target.x+=(this.x-this.target.x)*Math.min(1,dt*2.2);
+					this.target.x+=(this.x-this.target.x)*Math.min(1,dt*2.4);
 					this.target.y-=liftRate*dt;
-					if(this.target.y<this.y+42){
+
+					if(this.target.y<=this.y+46){
 						this.abductedDinosaur=this.target;
-						this.abductedDinosaur.abducted=true;
+						this.abductedDinosaur.x=this.x;
+						this.abductedDinosaur.y=this.y+48;
 						this.target=null;
 						this.targetType=null;
 						this.abducting=false;
 						this.fleeDir=this.x<W/2?-1:1;
 					}
 				}else{
-					this.target.chute=false;
-					this.target.state="abducted";
-					this.target.x+=(this.x-this.target.x)*Math.min(1,dt*4);
-					this.target.y-=115*dt;
-					if(this.target.y<this.y+18){
+					this.target.x+=(this.x-this.target.x)*Math.min(1,dt*6);
+					this.target.y-=155*dt;
+
+					if(this.target.y<=this.y+22){
 						this.abductedTrooper=this.target;
 						this.abductedTrooper.x=this.x;
 						this.abductedTrooper.y=this.y+30;
@@ -941,6 +964,20 @@ function update(dt,now){
 		spawnDinosaur(dt);
 		for(const p of planes)p.update(dt,d.factor);
 		for(const u of ufos)u.update(dt);
+
+		// Safety: an abducted trooper must always belong to an active UFO.
+		// If no UFO owns it, release it into a normal fall rather than leaving it suspended.
+		for(const t of troopers){
+			if(t.state!=="abducted")continue;
+			const owned=ufos.some(u=>!u.remove && !u.dead && (u.target===t || u.abductedTrooper===t));
+			if(!owned){
+				t.state="fall";
+				t.chute=false;
+				t.vy=Math.max(25,t.vy||0);
+				t.vx=t.vx||rand(-18,18);
+			}
+		}
+
 		for(const dino of dinosaurs)dino.update(dt);
 		for(const t of troopers)t.update(dt);
 		pyramidLayout();
