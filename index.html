@@ -221,7 +221,7 @@ class UFO{
 		this.baseY=rand(90,Math.max(150,H*.32));
 		this.y=this.baseY;
 		this.dir=this.x<0?1:-1;
-		this.speed=rand(135,175);
+		this.speed=rand(220,270);
 		this.age=0;
 		this.hp=cfg.ufoHP;
 		this.phase=rand(0,Math.PI*2);
@@ -231,7 +231,7 @@ class UFO{
 		this.target=null;
 		this.abducting=false;
 		this.abductedTrooper=null;
-		this.abductCooldown=rand(.15,.45);
+		this.abductCooldown=0;
 	}
 	update(dt){
 		this.age+=dt;
@@ -261,13 +261,13 @@ class UFO{
 			this.abducting=false;
 		}
 
-		if(!this.target && !this.abductedTrooper && this.abductCooldown<=0){
+		if(!this.target && !this.abductedTrooper){
 			const candidates=troopers.filter(t=>!t.remove && !t.dead && ["jump","chute","walk","stack"].includes(t.state));
 			if(candidates.length){
 				candidates.sort((a,b)=>dist2(this.x,this.y,a.x,a.y)-dist2(this.x,this.y,b.x,b.y));
 				this.target=candidates[0];
+				this.abductCooldown=0;
 			}
-			this.abductCooldown=rand(.15,.5);
 		}
 
 		if(this.target){
@@ -276,13 +276,13 @@ class UFO{
 			const dx=hoverX-this.x;
 			const dy=hoverY-this.y;
 
-			// Smooth pursuit: accelerate toward the target with a capped velocity.
-			this.seekVX=(this.seekVX||0)+clamp(dx*1.6,-190,190)*dt;
-			this.seekVY=(this.seekVY||0)+clamp(dy*1.6,-165,165)*dt;
-			this.seekVX*=.94;
-			this.seekVY*=.94;
-			this.seekVX=clamp(this.seekVX,-220,220);
-			this.seekVY=clamp(this.seekVY,-185,185);
+			// Aggressive but smooth pursuit at high speed.
+			const mag=Math.max(1,Math.hypot(dx,dy));
+			const pursuitSpeed=320;
+			const desiredVX=dx/mag*pursuitSpeed;
+			const desiredVY=dy/mag*pursuitSpeed;
+			this.seekVX=(this.seekVX||0)+(desiredVX-(this.seekVX||0))*Math.min(1,dt*5.5);
+			this.seekVY=(this.seekVY||0)+(desiredVY-(this.seekVY||0))*Math.min(1,dt*5.5);
 			this.x+=this.seekVX*dt;
 			this.y+=this.seekVY*dt;
 
@@ -298,32 +298,35 @@ class UFO{
 					this.abductedTrooper.y=this.y+30;
 					this.target=null;
 					this.abducting=false;
-					this.abductCooldown=rand(2.5,4.5);
+					this.fleeDir=this.x<W/2?-1:1;
+					this.abductCooldown=0;
 				}
 			}
 		}else if(this.abductedTrooper && !this.abductedTrooper.remove){
-			this.x+=this.dir*this.speed*1.35*dt;
-			this.y+=Math.sin(this.age*2.3+this.phase)*30*dt;
+			const escapeDir=this.fleeDir||this.dir;
+			this.x+=escapeDir*360*dt;
+			this.y+=Math.sin(this.age*2.3+this.phase)*38*dt;
 			this.abductedTrooper.x=this.x;
 			this.abductedTrooper.y=this.y+30;
-			if((this.dir>0 && this.x>W+100)||(this.dir<0 && this.x<-100)){
+			if((escapeDir>0 && this.x>W+100)||(escapeDir<0 && this.x<-100)){
 				this.abductedTrooper.remove=true;
 				this.abductedTrooper=null;
 				this.remove=true;
 			}
 		}else{
+			// Patrol rapidly while continuously looking for a target.
 			this.seekVX=(this.seekVX||this.dir*this.speed);
 			this.seekVY=(this.seekVY||0);
-			const desiredVX=this.dir*this.speed + Math.sin(this.age*2.1+this.phase)*28;
-			const desiredVY=Math.sin(this.age*1.7+this.phase)*45;
-			this.seekVX+=(desiredVX-this.seekVX)*Math.min(1,dt*1.8);
-			this.seekVY+=(desiredVY-this.seekVY)*Math.min(1,dt*1.8);
+			const desiredVX=this.dir*this.speed;
+			const desiredVY=Math.sin(this.age*2.2+this.phase)*65;
+			this.seekVX+=(desiredVX-this.seekVX)*Math.min(1,dt*3.5);
+			this.seekVY+=(desiredVY-this.seekVY)*Math.min(1,dt*3.5);
 			this.x+=this.seekVX*dt;
 			this.y+=this.seekVY*dt;
 			this.y=clamp(this.y,65,Math.max(120,groundY-140));
+			if(this.x<55){this.x=55;this.dir=1;this.seekVX=Math.abs(this.seekVX);}
+			if(this.x>W-55){this.x=W-55;this.dir=-1;this.seekVX=-Math.abs(this.seekVX);}
 		}
-
-		if((this.dir>0 && this.x>W+100)||(this.dir<0 && this.x<-100))this.remove=true;
 	}
 	draw(){
 		ctx.save();
@@ -370,22 +373,54 @@ class UFO{
 class Dinosaur{
 	constructor(){
 		this.dir=Math.random()<.5?1:-1;
-		this.x=this.dir>0?-70:W+70;
-		this.y=groundY-18;
-		this.speed=rand(58,78);
+		this.x=this.dir>0?-85:W+85;
+		this.y=groundY-20;
+		this.speed=rand(72,92);
 		this.hp=10;
 		this.dead=false;
 		this.remove=false;
 		this.target=null;
-		this.roamTarget=rand(60,W-60);
+		this.victim=null;
+		this.roamTarget=rand(70,W-70);
 		this.age=0;
 		this.ate=false;
+		this.chewTimer=0;
 	}
 	update(dt){
 		this.age+=dt;
 		if(this.dead){
 			this.y+=90*dt;
 			if(this.age>1.1)this.remove=true;
+			return;
+		}
+
+		if(this.victim){
+			this.chewTimer+=dt;
+			this.victim.state="eaten";
+			this.victim.chute=false;
+			this.victim.x=this.x+this.dir*39+Math.sin(this.chewTimer*24)*3;
+			this.victim.y=this.y-25+Math.cos(this.chewTimer*22)*2;
+			this.victim.eatenScale=Math.max(.12,1-this.chewTimer*.72);
+
+			if(Math.random()<dt*14){
+				splatterParticles.push({
+					x:this.x+this.dir*40,
+					y:this.y-22,
+					vx:rand(-45,45),
+					vy:rand(-80,-20),
+					r:rand(1.2,2.6),
+					t:rand(.25,.55),
+					red:true
+				});
+			}
+
+			if(this.chewTimer>1.25){
+				this.victim.remove=true;
+				this.victim=null;
+				this.ate=true;
+				this.roamTarget=this.dir>0?W+110:-110;
+				this.speed=rand(105,125);
+			}
 			return;
 		}
 
@@ -399,66 +434,106 @@ class Dinosaur{
 
 		let tx=this.target?this.target.x:this.roamTarget;
 		if(!this.target && Math.abs(tx-this.x)<18){
-			this.roamTarget=rand(60,W-60);
+			this.roamTarget=rand(70,W-70);
 			tx=this.roamTarget;
 		}
 
 		const dx=tx-this.x;
 		this.dir=Math.sign(dx)||this.dir;
 		this.x+=this.dir*this.speed*dt;
-		this.y=groundY-18+Math.sin(this.age*8)*1.5;
+		this.y=groundY-20+Math.sin(this.age*9)*1.5;
 
-		if(this.target && Math.abs(dx)<24){
-			this.target.remove=true;
-			this.ate=true;
+		if(this.target && Math.abs(dx)<28){
+			this.victim=this.target;
 			this.target=null;
-			this.roamTarget=this.dir>0?W+90:-90;
-			this.speed=rand(88,108);
+			this.chewTimer=0;
 		}
 
-		if(this.ate && (this.x<-100 || this.x>W+100))this.remove=true;
+		if(this.ate && (this.x<-120 || this.x>W+120))this.remove=true;
 	}
 	draw(){
 		ctx.save();
 		ctx.translate(this.x,this.y);
 		ctx.scale(this.dir,1);
 		ctx.lineWidth=3;
-		ctx.strokeStyle="#24361f";
-		ctx.fillStyle=this.dead?"#6f745f":"#6f9c45";
+		ctx.strokeStyle="#21351d";
+		ctx.fillStyle=this.dead?"#777463":"#618f3d";
 
+		// Long tail.
 		ctx.beginPath();
-		ctx.ellipse(0,-10,30,16,0,0,Math.PI*2);
-		ctx.fill();ctx.stroke();
-
-		ctx.beginPath();
-		ctx.moveTo(18,-16);
-		ctx.lineTo(38,-25);
-		ctx.lineTo(45,-18);
-		ctx.lineTo(30,-7);
+		ctx.moveTo(-22,-17);
+		ctx.quadraticCurveTo(-52,-28,-72,-12);
+		ctx.quadraticCurveTo(-48,-13,-24,-5);
 		ctx.closePath();
 		ctx.fill();ctx.stroke();
 
+		// Muscular body.
 		ctx.beginPath();
-		ctx.moveTo(-26,-11);
-		ctx.lineTo(-48,-22);
-		ctx.lineTo(-35,-5);
+		ctx.ellipse(-2,-18,31,19,-.08,0,Math.PI*2);
+		ctx.fill();ctx.stroke();
+
+		// Neck and large head.
+		ctx.beginPath();
+		ctx.moveTo(17,-29);
+		ctx.quadraticCurveTo(26,-40,37,-38);
+		ctx.lineTo(52,-34);
+		ctx.quadraticCurveTo(61,-29,56,-21);
+		ctx.lineTo(43,-16);
+		ctx.lineTo(23,-10);
 		ctx.closePath();
 		ctx.fill();ctx.stroke();
 
+		// Jaw with visible mouth.
+		const jaw=Math.sin(this.age*16)*2+(this.victim?5:0);
+		ctx.fillStyle="#456f31";
 		ctx.beginPath();
-		ctx.moveTo(-10,2);ctx.lineTo(-14,16);
-		ctx.moveTo(12,2);ctx.lineTo(16,16);
+		ctx.moveTo(34,-21);
+		ctx.lineTo(58,-20+jaw);
+		ctx.lineTo(47,-11+jaw);
+		ctx.lineTo(29,-13);
+		ctx.closePath();
+		ctx.fill();ctx.stroke();
+
+		ctx.fillStyle="#7d1f1f";
+		ctx.beginPath();
+		ctx.moveTo(37,-19);
+		ctx.lineTo(54,-18+jaw);
+		ctx.lineTo(45,-14+jaw);
+		ctx.closePath();
+		ctx.fill();
+
+		// Teeth.
+		ctx.fillStyle="#f4f0dc";
+		for(let i=0;i<4;i++){
+			const tx=39+i*4;
+			ctx.beginPath();
+			ctx.moveTo(tx,-19);
+			ctx.lineTo(tx+2,-14+jaw);
+			ctx.lineTo(tx+4,-19);
+			ctx.closePath();
+			ctx.fill();
+		}
+
+		// Powerful hind legs.
+		ctx.strokeStyle="#21351d";
+		ctx.lineWidth=6;
+		ctx.beginPath();
+		ctx.moveTo(-10,-4);ctx.lineTo(-14,12);ctx.lineTo(-24,18);
+		ctx.moveTo(12,-5);ctx.lineTo(17,11);ctx.lineTo(29,16);
 		ctx.stroke();
 
+		// Small forearms.
+		ctx.lineWidth=3;
+		ctx.beginPath();
+		ctx.moveTo(20,-17);ctx.lineTo(30,-10);ctx.lineTo(35,-12);
+		ctx.moveTo(18,-20);ctx.lineTo(27,-14);ctx.lineTo(31,-16);
+		ctx.stroke();
+
+		// Eye.
+		ctx.fillStyle="#f3c23c";
+		ctx.beginPath();ctx.arc(43,-31,3.3,0,Math.PI*2);ctx.fill();
 		ctx.fillStyle="#111";
-		ctx.beginPath();ctx.arc(33,-21,2.5,0,Math.PI*2);ctx.fill();
-
-		ctx.strokeStyle="#eee";
-		ctx.lineWidth=2;
-		ctx.beginPath();
-		ctx.moveTo(39,-15);ctx.lineTo(34,-11);
-		ctx.moveTo(43,-16);ctx.lineTo(38,-12);
-		ctx.stroke();
+		ctx.beginPath();ctx.arc(44,-31,1.4,0,Math.PI*2);ctx.fill();
 
 		ctx.restore();
 	}
@@ -485,6 +560,8 @@ class Trooper{
 			if(this.y>groundY-8){ this.y=groundY-8; makeSplat(this.x); this.remove=true; }
 		}else if(this.state==="abducted"){
 			this.wave+=dt*18;
+		}else if(this.state==="eaten"){
+			this.wave+=dt*28;
 		}else if(this.state==="walk"){
 			const tx=W/2 + (this.x<W/2?-72:72);
 			const dx=tx-this.x;
@@ -508,12 +585,17 @@ class Trooper{
 	}
 	draw(){
 		ctx.save(); ctx.translate(this.x,this.y);
+		if(this.state==="eaten"){
+			ctx.rotate(Math.sin(this.wave)*.35);
+			const s=this.eatenScale||1;
+			ctx.scale(s,s);
+		}
 		if(this.chute){
 			ctx.lineWidth=2.2; ctx.strokeStyle="#333"; ctx.fillStyle="#c7bdbb";
 			ctx.beginPath(); ctx.arc(0,-25,17,Math.PI,0); ctx.closePath(); ctx.fill(); ctx.stroke();
 			ctx.beginPath(); ctx.moveTo(-17,-25);ctx.lineTo(0,-8);ctx.moveTo(17,-25);ctx.lineTo(0,-8);ctx.moveTo(0,-42);ctx.lineTo(0,-8);ctx.stroke();
 		}
-		drawPerson(0,0,this.state==="fall"||this.state==="abducted",this.wave,this.state==="deadfall");
+		drawPerson(0,0,this.state==="fall"||this.state==="abducted"||this.state==="eaten",this.wave,this.state==="deadfall");
 		if(this.state==="fuse"){
 			ctx.fillStyle="#333";ctx.fillRect(-4,5,9,8);
 			ctx.strokeStyle="#d33";ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(4,6);ctx.quadraticCurveTo(10,1,8,-4);ctx.stroke();
@@ -673,7 +755,8 @@ function makeSplat(x){
 			vx:rand(-95,95),
 			vy:rand(-155,-45),
 			r:rand(1.5,3.2),
-			t:rand(.45,.9)
+			t:rand(.45,.9),
+			red:true
 		});
 	}
 }
@@ -796,7 +879,7 @@ function draw(){
 	ctx.fillStyle="#8fcf6b";ctx.fillRect(0,groundY,W,H-groundY);
 	ctx.strokeStyle="#333";ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(0,groundY);ctx.lineTo(W,groundY);ctx.stroke();
 	for(const tr of trees)drawTree(tr.x,groundY,tr.h,tr.w);
-	for(const s of splats){ctx.fillStyle="#087f75";ctx.beginPath();ctx.ellipse(s.x,s.y,14,3,0,0,Math.PI*2);ctx.fill();}
+	for(const s of splats){ctx.fillStyle="#b31217";ctx.beginPath();ctx.ellipse(s.x,s.y,14,3,0,0,Math.PI*2);ctx.fill();}
 	for(const p of planes)p.draw();
 	for(const u of ufos)u.draw();
 	for(const dino of dinosaurs)dino.draw();
@@ -804,8 +887,10 @@ function draw(){
 	drawTurret();
 	ctx.fillStyle="#333";
 	for(const b of bullets){ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);ctx.fill();}
-	ctx.fillStyle="#087f75";
-	for(const p of splatterParticles){ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fill();}
+	for(const p of splatterParticles){
+		ctx.fillStyle=p.red?"#b31217":"#087f75";
+		ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fill();
+	}
 	for(const p of particles){ctx.globalAlpha=clamp(p.t*2,0,1);ctx.fillStyle=p.hot?(p.t>.55?"#ff5a00":"#d7191c"):"#333";ctx.fillRect(p.x,p.y,p.hot?4:3,p.hot?4:3);ctx.globalAlpha=1}
 	for(const e of explosions){
 		ctx.save();ctx.globalAlpha=clamp(e.t*2.3,0,1);ctx.strokeStyle="#333";ctx.lineWidth=4;ctx.beginPath();ctx.arc(e.x,e.y,e.r,0,Math.PI*2);ctx.stroke();
