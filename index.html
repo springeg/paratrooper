@@ -258,6 +258,55 @@ class UFO{
 
 		this.abductCooldown-=dt;
 
+		// Drop invalid targets and immediately look for another one.
+		if(this.target){
+			if(this.targetType==="trooper"){
+				if(this.target.remove || this.target.dead || ["fall","deadfall","runner","plant","fuse","eaten","abducted"].includes(this.target.state)){
+					this.target=null;
+					this.targetType=null;
+					this.abducting=false;
+				}
+			}else if(this.targetType==="dinosaur"){
+				if(this.target.remove || this.target.dead || this.target.abducted){
+					this.target=null;
+					this.targetType=null;
+					this.abducting=false;
+				}
+			}
+		}
+
+		// Weighted target choice:
+		// ground paratrooper = 6
+		// airborne paratrooper = 3
+		// dinosaur = 2.5
+		// Thus ground troops are preferred, airborne troops are less likely,
+		// and dinosaurs are possible but less likely than either paratrooper category.
+		if(!this.target && !this.abductedTrooper && !this.abductedDinosaur){
+			const groundTroopers=troopers.filter(t=>!t.remove && !t.dead && ["walk","stack"].includes(t.state));
+			const airTroopers=troopers.filter(t=>!t.remove && !t.dead && ["jump","chute"].includes(t.state));
+			const dinosaurCandidates=dinosaurs.filter(d=>!d.remove && !d.dead && !d.abducted && !d.victim);
+
+			const groups=[];
+			if(groundTroopers.length)groups.push({kind:"ground",weight:6,candidates:groundTroopers});
+			if(airTroopers.length)groups.push({kind:"air",weight:3,candidates:airTroopers});
+			if(dinosaurCandidates.length)groups.push({kind:"dinosaur",weight:2.5,candidates:dinosaurCandidates});
+
+			if(groups.length){
+				const total=groups.reduce((sum,g)=>sum+g.weight,0);
+				let pick=Math.random()*total;
+				let chosen=groups[groups.length-1];
+				for(const g of groups){
+					pick-=g.weight;
+					if(pick<=0){chosen=g;break;}
+				}
+
+				chosen.candidates.sort((a,b)=>dist2(this.x,this.y,a.x,a.y)-dist2(this.x,this.y,b.x,b.y));
+				this.target=chosen.candidates[0];
+				this.targetType=chosen.kind==="dinosaur"?"dinosaur":"trooper";
+				this.abducting=false;
+			}
+		}
+
 		if(this.target){
 			const isDino=this.targetType==="dinosaur";
 			const hoverX=this.target.x;
