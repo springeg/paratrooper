@@ -57,8 +57,8 @@ const settings = document.getElementById("settings");
 
 let W=0,H=0,groundY=0,dpr=1;
 let mouse={x:0,y:0}, firing=false, spaceHeld=false, rightHeld=false;
-let score=0, elapsed=0, gameOver=false, paused=false, turretHealth=100, lastFire=0;
-let planes=[], ufos=[], dinosaurs=[], bullets=[], enemyBullets=[], troopers=[], particles=[], splatterParticles=[], explosions=[], colorExplosions=[], splats=[], trees=[];
+let score=0, elapsed=0, gameOver=false, paused=false, turretHealth=100, turretDestroyed=false, lastFire=0;
+let planes=[], ufos=[], dinosaurs=[], bullets=[], enemyBullets=[], troopers=[], particles=[], splatterParticles=[], debris=[], explosions=[], colorExplosions=[], splats=[], trees=[];
 let planeSpawnTimer=0, ufoSpawnTimer=18, dinosaurSpawnTimer=30, nextPlaneId=1;
 
 const cfg={
@@ -686,9 +686,23 @@ class Trooper{
 			this.y-=Math.min(20,Math.abs(dx)*.03)*dt;
 			if(Math.abs(dx)<18){this.state="plant";this.t=0;}
 		}else if(this.state==="plant"){
-			if(this.t>1.0){this.state="fuse";this.t=0;}
+			if(this.t>.9){
+				this.state="fuse";
+				this.t=0;
+				for(const other of troopers){
+					if(other!==this && !other.remove && !other.dead && ["walk","stack"].includes(other.state)){
+						other.state="flee";
+						other.fleeDir=other.x<W/2?-1:1;
+						other.t=0;
+					}
+				}
+			}
 		}else if(this.state==="fuse"){
-			if(this.t>2.0){ explodeTurret(); }
+			if(this.t>2.2){ explodeTurret(); }
+		}else if(this.state==="flee"){
+			this.walkDir=this.fleeDir|| (this.x<W/2?-1:1);
+			this.x+=this.walkDir*82*dt;
+			if(this.x<-40 || this.x>W+40)this.remove=true;
 		}
 	}
 	draw(){
@@ -704,9 +718,22 @@ class Trooper{
 			ctx.beginPath(); ctx.moveTo(-17,-25);ctx.lineTo(0,-8);ctx.moveTo(17,-25);ctx.lineTo(0,-8);ctx.moveTo(0,-42);ctx.lineTo(0,-8);ctx.stroke();
 		}
 		drawPerson(0,0,this.state==="fall"||this.state==="abducted"||this.state==="eaten",this.wave,this.state==="deadfall");
-		if(this.state==="fuse"){
-			ctx.fillStyle="#333";ctx.fillRect(-4,5,9,8);
-			ctx.strokeStyle="#d33";ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(4,6);ctx.quadraticCurveTo(10,1,8,-4);ctx.stroke();
+		if(this.state==="plant" || this.state==="fuse"){
+			ctx.fillStyle="#c5161d";
+			ctx.strokeStyle="#7a0d12";
+			ctx.lineWidth=2;
+			ctx.fillRect(-7,2,14,11);
+			ctx.strokeRect(-7,2,14,11);
+			ctx.fillStyle="#f3d54e";
+			ctx.fillRect(-2,4,4,3);
+			if(this.state==="fuse"){
+				ctx.strokeStyle="#ffcc33";
+				ctx.lineWidth=2;
+				ctx.beginPath();
+				ctx.moveTo(6,4);
+				ctx.quadraticCurveTo(13,-2,9,-8);
+				ctx.stroke();
+			}
 		}
 		ctx.restore();
 	}
@@ -738,6 +765,23 @@ function drawPerson(x,y,fall,wave,dead=false){
 
 function drawTurret(){
 	const x=W/2,y=groundY;
+	if(turretDestroyed){
+		// Destroyed building foundation/rubble remains.
+		ctx.fillStyle="#6f6662";
+		ctx.strokeStyle="#333";
+		ctx.lineWidth=3;
+		ctx.beginPath();
+		ctx.moveTo(x-42,y);
+		ctx.lineTo(x-31,y-12);
+		ctx.lineTo(x-12,y-7);
+		ctx.lineTo(x+4,y-15);
+		ctx.lineTo(x+23,y-6);
+		ctx.lineTo(x+41,y);
+		ctx.closePath();
+		ctx.fill();
+		ctx.stroke();
+		return;
+	}
 	ctx.lineWidth=3;ctx.strokeStyle="#333";ctx.fillStyle="#b5aaa6";
 	ctx.fillRect(x-34,y-34,68,34);ctx.strokeRect(x-34,y-34,68,34);
 	ctx.beginPath();ctx.arc(x,y-34,20,Math.PI,0);ctx.fill();ctx.stroke();
@@ -829,7 +873,7 @@ function updateBullets(dt){
 		}
 		if(b.hit) continue;
 		for(const t of troopers){
-			if(t.remove || t.state==="stack" || t.state==="runner" || t.state==="plant" || t.state==="fuse" || t.state==="abducted") continue;
+			if(t.remove || t.state==="stack" || t.state==="runner" || t.state==="plant" || t.state==="fuse" || t.state==="flee" || t.state==="abducted") continue;
 			if(t.chute && dist2(b.x,b.y,t.x,t.y-25)<19*19){
 				b.hit=true;t.chute=false;t.state="fall";t.vy=30;t.vx+=rand(-25,25);score+=10;spark(b.x,b.y);break;
 			}
@@ -894,7 +938,28 @@ function colorExplosion(x,y,r){
 }
 function explodeTurret(){
 	if(gameOver)return;
-	explosion(W/2,groundY-25,90);turretHealth=0;gameOver=true;
+	turretDestroyed=true;
+	turretHealth=0;
+
+	colorExplosion(W/2,groundY-32,105);
+	explosion(W/2,groundY-20,90);
+
+	// Blast turret and building debris upward and outward.
+	for(let i=0;i<34;i++){
+		debris.push({
+			x:W/2+rand(-32,32),
+			y:groundY-rand(8,42),
+			vx:rand(-240,240),
+			vy:rand(-330,-95),
+			w:rand(5,14),
+			h:rand(4,11),
+			rot:rand(0,Math.PI*2),
+			vr:rand(-8,8),
+			t:rand(1.5,3.2),
+			metal:Math.random()<.45
+		});
+	}
+	gameOver=true;
 }
 
 function pyramidLayout(){
@@ -936,7 +1001,7 @@ function spawnUFO(dt){
 	ufoSpawnTimer-=dt;
 	if(ufoSpawnTimer<=0 && ufos.length===0){
 		ufos.push(new UFO());
-		ufoSpawnTimer=rand(18,34);
+		ufoSpawnTimer=rand(34,55);
 	}
 }
 
@@ -944,13 +1009,13 @@ function spawnDinosaur(dt){
 	dinosaurSpawnTimer-=dt;
 	if(dinosaurSpawnTimer<=0 && dinosaurs.length===0){
 		dinosaurs.push(new Dinosaur());
-		dinosaurSpawnTimer=rand(28,50);
+		dinosaurSpawnTimer=rand(48,75);
 	}
 }
 
 function reset(){
-	score=0;elapsed=0;gameOver=false;turretHealth=100;lastFire=0;planeSpawnTimer=0;ufoSpawnTimer=rand(10,18);dinosaurSpawnTimer=rand(20,36);
-	planes=[];ufos=[];dinosaurs=[];bullets=[];enemyBullets=[];troopers=[];particles=[];splatterParticles=[];explosions=[];colorExplosions=[];splats=[];
+	score=0;elapsed=0;gameOver=false;turretDestroyed=false;turretHealth=100;lastFire=0;planeSpawnTimer=0;ufoSpawnTimer=rand(24,38);dinosaurSpawnTimer=rand(38,58);
+	planes=[];ufos=[];dinosaurs=[];bullets=[];enemyBullets=[];troopers=[];particles=[];splatterParticles=[];debris=[];explosions=[];colorExplosions=[];splats=[];
 	makeTrees();
 	for(let i=0;i<cfg.startPlanes;i++){const p=new Plane(i%2?1:-1);p.x=rand(0,W);planes.push(p);}
 }
@@ -995,6 +1060,21 @@ function update(dt,now){
 		if(p.y>groundY-2){p.y=groundY-2;p.vy*=-.18;p.vx*=.72;}
 	}
 	splatterParticles=splatterParticles.filter(p=>p.t>0);
+
+	for(const d of debris){
+		d.x+=d.vx*dt;
+		d.y+=d.vy*dt;
+		d.vy+=430*dt;
+		d.rot+=d.vr*dt;
+		d.t-=dt;
+		if(d.y>groundY-2){
+			d.y=groundY-2;
+			d.vy*=-.22;
+			d.vx*=.68;
+			d.vr*=.7;
+		}
+	}
+	debris=debris.filter(d=>d.t>0);
 	for(const e of explosions){e.t-=dt;e.r+=(e.max-e.r)*.23}
 	explosions=explosions.filter(e=>e.t>0);
 	for(const e of colorExplosions){e.t-=dt;e.r+=(e.max-e.r)*.28}
@@ -1024,6 +1104,17 @@ function draw(){
 		ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fill();
 	}
 	for(const p of particles){ctx.globalAlpha=clamp(p.t*2,0,1);ctx.fillStyle=p.hot?(p.t>.55?"#ff5a00":"#d7191c"):"#333";ctx.fillRect(p.x,p.y,p.hot?4:3,p.hot?4:3);ctx.globalAlpha=1}
+	for(const d of debris){
+		ctx.save();
+		ctx.translate(d.x,d.y);
+		ctx.rotate(d.rot);
+		ctx.fillStyle=d.metal?"#8b817c":"#5f5652";
+		ctx.strokeStyle="#333";
+		ctx.lineWidth=1.5;
+		ctx.fillRect(-d.w/2,-d.h/2,d.w,d.h);
+		ctx.strokeRect(-d.w/2,-d.h/2,d.w,d.h);
+		ctx.restore();
+	}
 	for(const e of explosions){
 		ctx.save();ctx.globalAlpha=clamp(e.t*2.3,0,1);ctx.strokeStyle="#333";ctx.lineWidth=4;ctx.beginPath();ctx.arc(e.x,e.y,e.r,0,Math.PI*2);ctx.stroke();
 		for(let i=0;i<10;i++){const a=i*Math.PI*2/10;ctx.beginPath();ctx.moveTo(e.x+Math.cos(a)*e.r*.7,e.y+Math.sin(a)*e.r*.7);ctx.lineTo(e.x+Math.cos(a)*e.r*1.25,e.y+Math.sin(a)*e.r*1.25);ctx.stroke()}
@@ -1045,10 +1136,14 @@ function draw(){
 		ctx.fillStyle="#222";ctx.textAlign="center";ctx.font="700 54px Arial";ctx.fillText("PAUSED",W/2,H/2);
 	}
 	if(gameOver){
-		ctx.fillStyle="rgba(255,255,255,.78)";ctx.fillRect(0,0,W,H);
-		ctx.fillStyle="#222";ctx.textAlign="center";ctx.font="700 58px Arial";ctx.fillText("TURRET DESTROYED",W/2,H/2-20);
-		ctx.font="28px Arial";ctx.fillText("Score: "+score,W/2,H/2+28);
-		ctx.font="20px Arial";ctx.fillText("Press Restart to play again",W/2,H/2+68);
+		ctx.fillStyle="rgba(255,255,255,.86)";
+		ctx.strokeStyle="#333";
+		ctx.lineWidth=2;
+		ctx.fillRect(W/2-190,110,380,118);
+		ctx.strokeRect(W/2-190,110,380,118);
+		ctx.fillStyle="#222";ctx.textAlign="center";ctx.font="700 38px Arial";ctx.fillText("TURRET DESTROYED",W/2,153);
+		ctx.font="24px Arial";ctx.fillText("Score: "+score,W/2,190);
+		ctx.font="17px Arial";ctx.fillText("Press Restart to play again",W/2,216);
 	}
 }
 
