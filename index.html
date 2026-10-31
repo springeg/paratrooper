@@ -917,6 +917,24 @@ function updateSaberRescueUFO(dt){
 	u.t+=dt;
 
 	if(u.state==="approach"){
+		if(saberFight){
+			u.green.x=saberFight.green.x;
+			u.green.y=saberFight.green.y;
+			u.blue.x=saberFight.blue.x;
+			u.blue.y=saberFight.blue.y;
+			saberFight.t+=dt;
+			const duelPush=Math.sin(saberFight.t*2.1)*13;
+			const sep=18+Math.sin(saberFight.t*5.2)*3;
+			const orient=saberFight.fromLeft?1:-1;
+			saberFight.green.x=saberFight.centerX-sep*orient+duelPush*orient;
+			saberFight.blue.x=saberFight.centerX+sep*orient+duelPush*orient;
+			saberFight.green.y=groundY-20+Math.sin(saberFight.t*8)*1.5;
+			saberFight.blue.y=groundY-20+Math.sin(saberFight.t*8+Math.PI)*1.5;
+			u.green.x=saberFight.green.x;
+			u.green.y=saberFight.green.y;
+			u.blue.x=saberFight.blue.x;
+			u.blue.y=saberFight.blue.y;
+		}
 		const dx=u.targetX-u.x;
 		const dy=u.targetY-u.y;
 		const d=Math.max(1,Math.hypot(dx,dy));
@@ -926,6 +944,12 @@ function updateSaberRescueUFO(dt){
 		if(d<10){
 			u.x=u.targetX;
 			u.y=u.targetY;
+			if(saberFight){
+				u.green.x=saberFight.green.x;
+				u.green.y=saberFight.green.y;
+				u.blue.x=saberFight.blue.x;
+				u.blue.y=saberFight.blue.y;
+			}
 			u.state="beam";
 			u.t=0;
 		}
@@ -993,8 +1017,12 @@ function drawSaberRescueUFO(){
 	}
 	ctx.restore();
 
-	// During the rescue sequence, draw the duelists without active saber combat.
-	if(u.state!=="approach"){
+	// Keep both duelists visible throughout approach, beam-up, and escape.
+	if(u.state==="approach" && saberFight){
+		const orient=saberFight.fromLeft?1:-1;
+		drawSaberFighter(u.green.x,u.green.y,orient,"#24d94f",saberFight.t);
+		drawSaberFighter(u.blue.x,u.blue.y,-orient,"#2997ff",saberFight.t+.35);
+	}else{
 		drawSaberFighter(u.green.x,u.green.y,1,"#24d94f",u.t);
 		drawSaberFighter(u.blue.x,u.blue.y,-1,"#2997ff",u.t+.35);
 	}
