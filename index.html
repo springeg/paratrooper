@@ -57,7 +57,7 @@ const settings = document.getElementById("settings");
 
 let W=0,H=0,groundY=0,dpr=1;
 let mouse={x:0,y:0}, firing=false, spaceHeld=false, rightHeld=false;
-let score=0, elapsed=0, gameOver=false, paused=false, pauseElapsed=0, saberFight=null, turretHealth=100, turretDestroyed=false, lastFire=0;
+let score=0, elapsed=0, gameOver=false, paused=false, pauseElapsed=0, saberFight=null, saberRescueUFO=null, turretHealth=100, turretDestroyed=false, lastFire=0;
 let planes=[], ufos=[], dinosaurs=[], bullets=[], enemyBullets=[], troopers=[], particles=[], splatterParticles=[], debris=[], explosions=[], colorExplosions=[], splats=[], trees=[];
 let planeSpawnTimer=0, ufoSpawnTimer=18, dinosaurSpawnTimer=30, nextPlaneId=1;
 
@@ -893,6 +893,114 @@ function drawSaberFight(){
 	}
 }
 
+function startSaberRescueUFO(){
+	if(!saberFight)return;
+	const center=(saberFight.green.x+saberFight.blue.x)/2;
+	const enterFromLeft=center>W/2;
+	saberRescueUFO={
+		x:enterFromLeft?-80:W+80,
+		y:Math.max(90,groundY-180),
+		targetX:center,
+		targetY:groundY-105,
+		dir:enterFromLeft?1:-1,
+		state:"approach",
+		t:0,
+		green:{x:saberFight.green.x,y:saberFight.green.y},
+		blue:{x:saberFight.blue.x,y:saberFight.blue.y},
+		lift:0
+	};
+}
+
+function updateSaberRescueUFO(dt){
+	const u=saberRescueUFO;
+	if(!u)return;
+	u.t+=dt;
+
+	if(u.state==="approach"){
+		const dx=u.targetX-u.x;
+		const dy=u.targetY-u.y;
+		const d=Math.max(1,Math.hypot(dx,dy));
+		const speed=285;
+		u.x+=dx/d*speed*dt;
+		u.y+=dy/d*speed*dt;
+		if(d<10){
+			u.x=u.targetX;
+			u.y=u.targetY;
+			u.state="beam";
+			u.t=0;
+		}
+	}else if(u.state==="beam"){
+		u.lift=Math.min(1,u.lift+dt*.65);
+		for(const fighter of [u.green,u.blue]){
+			fighter.x+=(u.x-fighter.x)*Math.min(1,dt*2.8);
+			fighter.y-=78*dt;
+		}
+		if(u.green.y<=u.y+34 && u.blue.y<=u.y+34){
+			u.green.x=u.x-10;u.green.y=u.y+30;
+			u.blue.x=u.x+10;u.blue.y=u.y+30;
+			u.state="escape";
+			u.t=0;
+			u.escapeDir=u.x<W/2?-1:1;
+		}
+	}else if(u.state==="escape"){
+		u.x+=u.escapeDir*330*dt;
+		u.y-=35*dt;
+		u.green.x=u.x-10;u.green.y=u.y+30;
+		u.blue.x=u.x+10;u.blue.y=u.y+30;
+		if((u.escapeDir>0 && u.x>W+120)||(u.escapeDir<0 && u.x<-120)||u.y<-90){
+			saberRescueUFO=null;
+			saberFight=null;
+		}
+	}
+}
+
+function drawSaberRescueUFO(){
+	const u=saberRescueUFO;
+	if(!u)return;
+
+	if(u.state==="beam"){
+		ctx.save();
+		ctx.fillStyle="rgba(160,255,210,.20)";
+		ctx.strokeStyle="rgba(90,210,150,.72)";
+		ctx.lineWidth=2;
+		ctx.beginPath();
+		ctx.moveTo(u.x-18,u.y+10);
+		ctx.lineTo(u.green.x-14,u.green.y);
+		ctx.lineTo(u.blue.x+14,u.blue.y);
+		ctx.lineTo(u.x+18,u.y+10);
+		ctx.closePath();
+		ctx.fill();
+		ctx.stroke();
+		ctx.restore();
+	}
+
+	ctx.save();
+	ctx.translate(u.x,u.y);
+	ctx.lineWidth=3;
+	ctx.strokeStyle="#353535";
+	ctx.fillStyle="#aaa";
+	ctx.beginPath();
+	ctx.ellipse(0,5,34,11,0,0,Math.PI*2);
+	ctx.fill();ctx.stroke();
+	ctx.fillStyle="#d7d7d2";
+	ctx.beginPath();
+	ctx.arc(0,0,15,Math.PI,0);
+	ctx.closePath();
+	ctx.fill();ctx.stroke();
+	ctx.fillStyle="#353535";
+	for(const lx of [-18,0,18]){
+		ctx.beginPath();ctx.arc(lx,8,2.5,0,Math.PI*2);ctx.fill();
+	}
+	ctx.restore();
+
+	// During the rescue sequence, draw the duelists without active saber combat.
+	if(u.state!=="approach"){
+		drawSaberFighter(u.green.x,u.green.y,1,"#24d94f",u.t);
+		drawSaberFighter(u.blue.x,u.blue.y,-1,"#2997ff",u.t+.35);
+	}
+}
+
+
 function drawTurret(){
 	const x=W/2,y=groundY;
 	if(turretDestroyed){
@@ -1180,7 +1288,7 @@ function spawnDinosaur(dt){
 }
 
 function reset(){
-	score=0;elapsed=0;gameOver=false;pauseElapsed=0;saberFight=null;turretDestroyed=false;turretHealth=100;lastFire=0;planeSpawnTimer=0;ufoSpawnTimer=rand(24,38);dinosaurSpawnTimer=rand(38,58);
+	score=0;elapsed=0;gameOver=false;pauseElapsed=0;saberFight=null;saberRescueUFO=null;turretDestroyed=false;turretHealth=100;lastFire=0;planeSpawnTimer=0;ufoSpawnTimer=rand(24,38);dinosaurSpawnTimer=rand(38,58);
 	planes=[];ufos=[];dinosaurs=[];bullets=[];enemyBullets=[];troopers=[];particles=[];splatterParticles=[];debris=[];explosions=[];colorExplosions=[];splats=[];
 	makeTrees();
 	for(let i=0;i<cfg.startPlanes;i++){const p=new Plane(i%2?1:-1);p.x=rand(0,W);planes.push(p);}
@@ -1194,6 +1302,7 @@ function update(dt,now){
 
 	if(!gameOver && !paused){
 		elapsed+=dt;
+		if(saberRescueUFO)updateSaberRescueUFO(dt);
 		const d=difficulty(); levelEl.textContent=d.lvl;
 		spawnPlanes(dt,d);
 		spawnUFO(dt);
@@ -1267,7 +1376,8 @@ function draw(){
 	for(const u of ufos)u.draw();
 	for(const dino of dinosaurs)dino.draw();
 	for(const t of troopers)t.draw();
-	if(paused && pauseElapsed>=60)drawSaberFight();
+	if(paused && pauseElapsed>=60 && !saberRescueUFO)drawSaberFight();
+	if(saberRescueUFO)drawSaberRescueUFO();
 	drawTurret();
 	ctx.fillStyle="#333";
 	for(const b of bullets){ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);ctx.fill();}
@@ -1359,15 +1469,29 @@ addEventListener("keydown",e=>{if(e.code==="Space"){spaceHeld=true;e.preventDefa
 addEventListener("keyup",e=>{if(e.code==="Space"){spaceHeld=false;e.preventDefault()}});
 
 document.getElementById("pauseBtn").onclick=()=>{
-	paused=!paused;
-	pauseElapsed=0;
-	saberFight=null;
+	if(paused){
+		// Resume: if the 60-second saber duel is active, an invulnerable
+		// special UFO arrives to abduct both fighters.
+		if(saberFight && pauseElapsed>=60 && !saberRescueUFO){
+			startSaberRescueUFO();
+		}else{
+			saberFight=null;
+		}
+		paused=false;
+		pauseElapsed=0;
+	}else{
+		paused=true;
+		pauseElapsed=0;
+		saberFight=null;
+		saberRescueUFO=null;
+	}
 	document.getElementById("pauseBtn").textContent=paused?"Resume":"Pause";
 };
 document.getElementById("restartBtn").onclick=()=>{
 	paused=false;
 	pauseElapsed=0;
 	saberFight=null;
+	saberRescueUFO=null;
 	document.getElementById("pauseBtn").textContent="Pause";
 	reset();
 };
