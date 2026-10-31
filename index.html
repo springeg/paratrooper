@@ -57,7 +57,7 @@ const settings = document.getElementById("settings");
 
 let W=0,H=0,groundY=0,dpr=1;
 let mouse={x:0,y:0}, firing=false, spaceHeld=false, rightHeld=false;
-let score=0, elapsed=0, gameOver=false, paused=false, pauseElapsed=0, saberFight=null, saberRescueUFO=null, turretHealth=100, turretDestroyed=false, lastFire=0;
+let score=0, elapsed=0, gameOver=false, paused=false, pauseElapsed=0, saberFight=null, saberRescueUFO=null, xyzzyFleet=null, cheatBuffer="", turretHealth=100, turretDestroyed=false, lastFire=0;
 let planes=[], ufos=[], dinosaurs=[], bullets=[], enemyBullets=[], troopers=[], particles=[], splatterParticles=[], debris=[], explosions=[], colorExplosions=[], splats=[], trees=[];
 let planeSpawnTimer=0, ufoSpawnTimer=18, dinosaurSpawnTimer=30, nextPlaneId=1;
 
@@ -1001,6 +1001,212 @@ function drawSaberRescueUFO(){
 }
 
 
+
+function startXyzzyFleet(){
+	if(xyzzyFleet || gameOver)return;
+
+	const ships=[];
+	const count=6;
+	for(let i=0;i<count;i++){
+		ships.push({
+			x:-120-i*85,
+			y:78+(i%3)*34,
+			targetX:90+i*(Math.max(220,W-180)/(count-1)),
+			phase:i*.7
+		});
+	}
+
+	xyzzyFleet={
+		ships,
+		state:"enter",
+		t:0,
+		fireTimer:.25,
+		targetIndex:0,
+		targets:[],
+		lasers:[]
+	};
+}
+
+function collectXyzzyTargets(){
+	const list=[];
+
+	for(const p of planes){
+		if(!p.remove && !p.dead)list.push({kind:"plane",obj:p});
+	}
+	for(const t of troopers){
+		if(!t.remove && !t.dead)list.push({kind:"trooper",obj:t});
+	}
+
+	// Sweep roughly from left to right for a readable barrage.
+	list.sort((a,b)=>(a.obj.x||0)-(b.obj.x||0));
+	return list;
+}
+
+function killXyzzyTarget(target){
+	if(!target || !target.obj)return;
+	const o=target.obj;
+
+	if(target.kind==="plane"){
+		if(o.remove || o.dead)return;
+		o.dead=true;
+		o.vy=35;
+		colorExplosion(o.x,o.y,34);
+	}else{
+		if(o.remove || o.dead)return;
+
+		// Break any special ownership/state before killing the trooper.
+		for(const u of ufos){
+			if(u.target===o){
+				u.target=null;
+				u.targetType=null;
+				u.abducting=false;
+			}
+			if(u.abductedTrooper===o)u.abductedTrooper=null;
+		}
+
+		o.chute=false;
+		o.dead=true;
+
+		if(o.y>=groundY-34 || ["walk","stack","runner","plant","fuse","flee"].includes(o.state)){
+			makeSplat(o.x);
+			o.remove=true;
+		}else{
+			o.state="deadfall";
+			o.vy=70;
+			o.vx=rand(-35,35);
+		}
+	}
+}
+
+function updateXyzzyFleet(dt){
+	const f=xyzzyFleet;
+	if(!f)return;
+	f.t+=dt;
+
+	if(f.state==="enter"){
+		let allReady=true;
+		for(const s of f.ships){
+			const dx=s.targetX-s.x;
+			if(Math.abs(dx)>4){
+				s.x+=Math.sign(dx)*Math.min(Math.abs(dx),310*dt);
+				allReady=false;
+			}
+			s.y+=Math.sin(f.t*3+s.phase)*10*dt;
+		}
+		if(allReady){
+			f.targets=collectXyzzyTargets();
+			f.targetIndex=0;
+			f.fireTimer=.1;
+			f.state="attack";
+		}
+	}else if(f.state==="attack"){
+		f.fireTimer-=dt;
+
+		// Remove expired beams.
+		for(const l of f.lasers)l.t-=dt;
+		f.lasers=f.lasers.filter(l=>l.t>0);
+
+		// If new planes/troopers appear while the fleet is attacking, append them.
+		if(f.targetIndex>=f.targets.length){
+			const known=new Set(f.targets.map(x=>x.obj));
+			for(const x of collectXyzzyTargets()){
+				if(!known.has(x.obj))f.targets.push(x);
+			}
+		}
+
+		if(f.fireTimer<=0 && f.targetIndex<f.targets.length){
+			const target=f.targets[f.targetIndex++];
+			const o=target.obj;
+
+			if(o && !o.remove && !(target.kind==="plane"&&o.dead) && !(target.kind==="trooper"&&o.dead)){
+				let best=f.ships[0];
+				let bestD=Infinity;
+				for(const s of f.ships){
+					const d=dist2(s.x,s.y,o.x,o.y);
+					if(d<bestD){bestD=d;best=s;}
+				}
+
+				f.lasers.push({
+					x1:best.x,
+					y1:best.y+10,
+					x2:o.x,
+					y2:o.y,
+					t:.20
+				});
+				killXyzzyTarget(target);
+			}
+			f.fireTimer=.12;
+		}
+
+		const remaining=collectXyzzyTargets();
+		if(f.targetIndex>=f.targets.length && remaining.length===0 && f.lasers.length===0){
+			f.state="exit";
+			f.t=0;
+		}
+	}else if(f.state==="exit"){
+		let gone=true;
+		for(const s of f.ships){
+			s.x+=360*dt;
+			s.y-=18*dt;
+			if(s.x<W+140)gone=false;
+		}
+		if(gone)xyzzyFleet=null;
+	}
+}
+
+function drawXyzzyFleet(){
+	const f=xyzzyFleet;
+	if(!f)return;
+
+	// Thick green laser barrage.
+	ctx.save();
+	ctx.lineCap="round";
+	for(const l of f.lasers){
+		const a=clamp(l.t/.20,0,1);
+		ctx.globalAlpha=a;
+		ctx.strokeStyle="#1dff55";
+		ctx.lineWidth=9;
+		ctx.beginPath();
+		ctx.moveTo(l.x1,l.y1);
+		ctx.lineTo(l.x2,l.y2);
+		ctx.stroke();
+
+		ctx.strokeStyle="#d8ffe2";
+		ctx.lineWidth=3;
+		ctx.beginPath();
+		ctx.moveTo(l.x1,l.y1);
+		ctx.lineTo(l.x2,l.y2);
+		ctx.stroke();
+	}
+	ctx.restore();
+
+	for(const s of f.ships){
+		ctx.save();
+		ctx.translate(s.x,s.y);
+		ctx.lineWidth=3;
+		ctx.strokeStyle="#263126";
+		ctx.fillStyle="#aeb6ae";
+
+		ctx.beginPath();
+		ctx.ellipse(0,6,36,12,0,0,Math.PI*2);
+		ctx.fill();ctx.stroke();
+
+		ctx.fillStyle="#d9e4d9";
+		ctx.beginPath();
+		ctx.arc(0,0,16,Math.PI,0);
+		ctx.closePath();
+		ctx.fill();ctx.stroke();
+
+		ctx.fillStyle="#34ff68";
+		for(const lx of [-20,0,20]){
+			ctx.beginPath();
+			ctx.arc(lx,9,3,0,Math.PI*2);
+			ctx.fill();
+		}
+		ctx.restore();
+	}
+}
+
 function drawTurret(){
 	const x=W/2,y=groundY;
 	if(turretDestroyed){
@@ -1288,7 +1494,7 @@ function spawnDinosaur(dt){
 }
 
 function reset(){
-	score=0;elapsed=0;gameOver=false;pauseElapsed=0;saberFight=null;saberRescueUFO=null;turretDestroyed=false;turretHealth=100;lastFire=0;planeSpawnTimer=0;ufoSpawnTimer=rand(24,38);dinosaurSpawnTimer=rand(38,58);
+	score=0;elapsed=0;gameOver=false;pauseElapsed=0;saberFight=null;saberRescueUFO=null;xyzzyFleet=null;cheatBuffer="";turretDestroyed=false;turretHealth=100;lastFire=0;planeSpawnTimer=0;ufoSpawnTimer=rand(24,38);dinosaurSpawnTimer=rand(38,58);
 	planes=[];ufos=[];dinosaurs=[];bullets=[];enemyBullets=[];troopers=[];particles=[];splatterParticles=[];debris=[];explosions=[];colorExplosions=[];splats=[];
 	makeTrees();
 	for(let i=0;i<cfg.startPlanes;i++){const p=new Plane(i%2?1:-1);p.x=rand(0,W);planes.push(p);}
@@ -1303,8 +1509,11 @@ function update(dt,now){
 	if(!gameOver && !paused){
 		elapsed+=dt;
 		if(saberRescueUFO)updateSaberRescueUFO(dt);
+		if(xyzzyFleet)updateXyzzyFleet(dt);
 		const d=difficulty(); levelEl.textContent=d.lvl;
-		spawnPlanes(dt,d);
+		if(!xyzzyFleet){
+			spawnPlanes(dt,d);
+		}
 		spawnUFO(dt);
 		spawnDinosaur(dt);
 		for(const p of planes)p.update(dt,d.factor);
@@ -1376,6 +1585,7 @@ function draw(){
 	for(const u of ufos)u.draw();
 	for(const dino of dinosaurs)dino.draw();
 	for(const t of troopers)t.draw();
+	if(xyzzyFleet)drawXyzzyFleet();
 	if(paused && pauseElapsed>=60 && !saberRescueUFO)drawSaberFight();
 	if(saberRescueUFO)drawSaberRescueUFO();
 	drawTurret();
@@ -1467,6 +1677,15 @@ canvas.addEventListener("mousedown",e=>{
 addEventListener("mouseup",e=>{if(e.button===2)rightHeld=false;if(e.button===0)firing=false});
 addEventListener("keydown",e=>{if(e.code==="Space"){spaceHeld=true;e.preventDefault()}});
 addEventListener("keyup",e=>{if(e.code==="Space"){spaceHeld=false;e.preventDefault()}});
+addEventListener("keydown",e=>{
+	if(e.key && e.key.length===1 && !e.metaKey && !e.ctrlKey && !e.altKey){
+		cheatBuffer=(cheatBuffer+e.key.toLowerCase()).slice(-5);
+		if(cheatBuffer==="xyzzy"){
+			startXyzzyFleet();
+			cheatBuffer="";
+		}
+	}
+});
 
 document.getElementById("pauseBtn").onclick=()=>{
 	if(paused){
@@ -1492,6 +1711,8 @@ document.getElementById("restartBtn").onclick=()=>{
 	pauseElapsed=0;
 	saberFight=null;
 	saberRescueUFO=null;
+	xyzzyFleet=null;
+	cheatBuffer="";
 	document.getElementById("pauseBtn").textContent="Pause";
 	reset();
 };
