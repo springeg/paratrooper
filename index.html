@@ -57,7 +57,7 @@ const settings = document.getElementById("settings");
 
 let W=0,H=0,groundY=0,dpr=1;
 let mouse={x:0,y:0}, firing=false, spaceHeld=false, rightHeld=false;
-let score=0, elapsed=0, gameOver=false, paused=false, pauseElapsed=0, saberFight=null, saberRescueUFO=null, xyzzyFleet=null, cheatBuffer="", konamiMode=false, konamiIndex=0, turretHealth=100, turretDestroyed=false, lastFire=0;
+let score=0, elapsed=0, gameOver=false, paused=false, pauseElapsed=0, saberFight=null, saberRescueUFO=null, xyzzyFleet=null, cheatBuffer="", konamiMode=false, konamiIndex=0, konamiNotice=0, turretHealth=100, turretDestroyed=false, lastFire=0;
 let planes=[], ufos=[], dinosaurs=[], bullets=[], enemyBullets=[], troopers=[], particles=[], splatterParticles=[], debris=[], explosions=[], colorExplosions=[], splats=[], trees=[];
 let planeSpawnTimer=0, ufoSpawnTimer=18, dinosaurSpawnTimer=30, nextPlaneId=1;
 
@@ -1532,6 +1532,7 @@ function explodeTurret(){
 function activateKonamiMode(){
 	if(konamiMode || gameOver)return;
 	konamiMode=true;
+	konamiNotice=3.5;
 
 	// Existing aircraft vanish; the replacement mothership wave starts immediately.
 	planes=[];
@@ -1634,13 +1635,15 @@ function spawnDinosaur(dt){
 }
 
 function reset(){
-	score=0;elapsed=0;gameOver=false;pauseElapsed=0;saberFight=null;saberRescueUFO=null;xyzzyFleet=null;cheatBuffer="";konamiMode=false;konamiIndex=0;turretDestroyed=false;turretHealth=100;lastFire=0;planeSpawnTimer=0;ufoSpawnTimer=rand(24,38);dinosaurSpawnTimer=rand(38,58);
+	score=0;elapsed=0;gameOver=false;pauseElapsed=0;saberFight=null;saberRescueUFO=null;xyzzyFleet=null;cheatBuffer="";konamiMode=false;konamiIndex=0;konamiNotice=0;turretDestroyed=false;turretHealth=100;lastFire=0;planeSpawnTimer=0;ufoSpawnTimer=rand(24,38);dinosaurSpawnTimer=rand(38,58);
 	planes=[];ufos=[];dinosaurs=[];bullets=[];enemyBullets=[];troopers=[];particles=[];splatterParticles=[];debris=[];explosions=[];colorExplosions=[];splats=[];
 	makeTrees();
 	for(let i=0;i<cfg.startPlanes;i++){const p=new Plane(i%2?1:-1);p.x=rand(0,W);planes.push(p);}
 }
 
 function update(dt,now){
+	if(konamiNotice>0)konamiNotice=Math.max(0,konamiNotice-dt);
+
 	if(paused && !gameOver){
 		pauseElapsed+=dt;
 		if(pauseElapsed>=60)updateSaberFight(dt);
@@ -1763,6 +1766,20 @@ function draw(){
 		ctx.beginPath();ctx.arc(e.x,e.y,e.r*.28,0,Math.PI*2);ctx.fill();
 		ctx.restore();
 	}
+	if(konamiNotice>0){
+		ctx.save();
+		ctx.fillStyle="rgba(20,55,24,.88)";
+		ctx.strokeStyle="#39e75f";
+		ctx.lineWidth=2;
+		ctx.fillRect(W/2-145,66,290,42);
+		ctx.strokeRect(W/2-145,66,290,42);
+		ctx.fillStyle="#9dffad";
+		ctx.textAlign="center";
+		ctx.font="700 20px Arial";
+		ctx.fillText("ALIEN INVASION",W/2,94);
+		ctx.restore();
+	}
+
 	if(paused && !gameOver){
 		ctx.save();
 		ctx.fillStyle="rgba(255,255,255,.88)";
@@ -1827,17 +1844,31 @@ addEventListener("keydown",e=>{
 	}
 });
 addEventListener("keydown",e=>{
-	const code=["ArrowUp","ArrowUp","ArrowDown","ArrowDown","ArrowLeft","ArrowRight","ArrowLeft","ArrowRight","KeyB","KeyA"];
-	if(e.code===code[konamiIndex]){
+	if(e.repeat)return;
+
+	const sequence=["arrowup","arrowup","arrowdown","arrowdown","arrowleft","arrowright","arrowleft","arrowright","b","a"];
+	let key=(e.key||"").toLowerCase();
+
+	// Normalize browsers/keyboards that report letter keys primarily through code.
+	if(!key || key==="unidentified"){
+		if(e.code==="KeyB")key="b";
+		else if(e.code==="KeyA")key="a";
+		else key=(e.code||"").toLowerCase();
+	}
+
+	if(key.startsWith("arrow"))e.preventDefault();
+
+	if(key===sequence[konamiIndex]){
 		konamiIndex++;
-		if(konamiIndex===code.length){
+		if(konamiIndex===sequence.length){
 			activateKonamiMode();
 			konamiIndex=0;
 		}
 	}else{
-		konamiIndex=e.code===code[0]?1:0;
+		// Allow a fresh first Up press to immediately restart the sequence.
+		konamiIndex=key===sequence[0]?1:0;
 	}
-});
+},true);
 
 document.getElementById("pauseBtn").onclick=()=>{
 	if(paused){
@@ -1867,6 +1898,7 @@ document.getElementById("restartBtn").onclick=()=>{
 	cheatBuffer="";
 	konamiMode=false;
 	konamiIndex=0;
+	konamiNotice=0;
 	document.getElementById("pauseBtn").textContent="Pause";
 	reset();
 };
