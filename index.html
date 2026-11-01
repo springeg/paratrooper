@@ -58,7 +58,7 @@ const ALIEN_GREEN="#138a36";
 
 let W=0,H=0,groundY=0,dpr=1;
 let mouse={x:0,y:0}, firing=false, spaceHeld=false, rightHeld=false;
-let score=0, elapsed=0, gameOver=false, paused=false, pauseElapsed=0, saberFight=null, saberRescueUFO=null, xyzzyFleet=null, cheatBuffer="", konamiMode=false, konamiIndex=0, konamiNotice=0, turretHealth=100, turretDestroyed=false, lastFire=0;
+let score=0, elapsed=0, gameOver=false, paused=false, pauseElapsed=0, saberFight=null, saberRescueUFO=null, xyzzyFleet=null, cheatBuffer="", konamiMode=false, konamiIndex=0, konamiNotice=0, plantedExplosive=null, turretHealth=100, turretDestroyed=false, lastFire=0;
 let planes=[], ufos=[], dinosaurs=[], bullets=[], enemyBullets=[], troopers=[], particles=[], splatterParticles=[], debris=[], explosions=[], colorExplosions=[], splats=[], trees=[];
 let planeSpawnTimer=0, ufoSpawnTimer=18, dinosaurSpawnTimer=30, nextPlaneId=1;
 
@@ -802,10 +802,14 @@ class Trooper{
 			}
 		}else if(this.state==="plant"){
 			if(this.t>.9){
-				this.state="fuse";
-				this.t=0;
+				plantedExplosive={
+					x:this.x,
+					y:this.y+5,
+					t:0
+				};
+
 				for(const other of troopers){
-					if(other!==this && !other.remove && !other.dead && ["walk","stack"].includes(other.state)){
+					if(!other.remove && !other.dead && ["walk","stack"].includes(other.state)){
 						other.state="flee";
 						other.fleeDir=other.x<W/2?-1:1;
 						other.y=groundY-20;
@@ -813,9 +817,14 @@ class Trooper{
 						other.t=0;
 					}
 				}
+
+				// The planter also abandons the turret and runs for safety.
+				this.state="flee";
+				this.fleeDir=this.x<W/2?-1:1;
+				this.y=groundY-20;
+				this.x+=this.fleeDir*8;
+				this.t=0;
 			}
-		}else if(this.state==="fuse"){
-			if(this.t>2.2){ explodeTurret(); }
 		}else if(this.state==="flee"){
 			this.walkDir=this.fleeDir|| (this.x<W/2?-1:1);
 			this.x+=this.walkDir*82*dt;
@@ -839,7 +848,7 @@ class Trooper{
 		}else{
 			drawPerson(0,0,this.state==="fall"||this.state==="abducted"||this.state==="eaten",this.wave,this.state==="deadfall");
 		}
-		if(!turretDestroyed && (this.state==="plant" || this.state==="fuse")){
+		if(!turretDestroyed && this.state==="plant"){
 			ctx.fillStyle="#c5161d";
 			ctx.strokeStyle="#7a0d12";
 			ctx.lineWidth=2;
@@ -847,14 +856,6 @@ class Trooper{
 			ctx.strokeRect(-7,2,14,11);
 			ctx.fillStyle="#f3d54e";
 			ctx.fillRect(-2,4,4,3);
-			if(this.state==="fuse"){
-				ctx.strokeStyle="#ffcc33";
-				ctx.lineWidth=2;
-				ctx.beginPath();
-				ctx.moveTo(6,4);
-				ctx.quadraticCurveTo(13,-2,9,-8);
-				ctx.stroke();
-			}
 		}
 		ctx.restore();
 	}
@@ -1567,6 +1568,8 @@ function colorExplosion(x,y,r){
 function explodeTurret(){
 	if(gameOver)return;
 
+	plantedExplosive=null;
+
 	for(const t of troopers){
 		if(t.state==="plant" || t.state==="fuse"){
 			t.remove=true;
@@ -1661,7 +1664,7 @@ function pyramidLayout(){
 		t.y=groundY-17;
 	}
 
-	const attackInProgress=troopers.some(t=>["runner","plant","fuse"].includes(t.state));
+	const attackInProgress=!!plantedExplosive || troopers.some(t=>["runner","plant"].includes(t.state));
 	if(stackers.length>=requiredCount && !attackInProgress){
 		// The last member of a complete triangular pyramid is the apex troop.
 		const candidate=stackers[requiredCount-1];
@@ -1703,7 +1706,7 @@ function spawnDinosaur(dt){
 }
 
 function reset(){
-	score=0;elapsed=0;gameOver=false;pauseElapsed=0;saberFight=null;saberRescueUFO=null;xyzzyFleet=null;cheatBuffer="";konamiMode=false;konamiIndex=0;konamiNotice=0;turretDestroyed=false;turretHealth=100;lastFire=0;planeSpawnTimer=0;ufoSpawnTimer=rand(24,38);dinosaurSpawnTimer=rand(38,58);
+	score=0;elapsed=0;gameOver=false;pauseElapsed=0;saberFight=null;saberRescueUFO=null;xyzzyFleet=null;cheatBuffer="";konamiMode=false;konamiIndex=0;konamiNotice=0;plantedExplosive=null;turretDestroyed=false;turretHealth=100;lastFire=0;planeSpawnTimer=0;ufoSpawnTimer=rand(24,38);dinosaurSpawnTimer=rand(38,58);
 	planes=[];ufos=[];dinosaurs=[];bullets=[];enemyBullets=[];troopers=[];particles=[];splatterParticles=[];debris=[];explosions=[];colorExplosions=[];splats=[];
 	makeTrees();
 	for(let i=0;i<cfg.startPlanes;i++){const p=new Plane(i%2?1:-1);p.x=rand(0,W);planes.push(p);}
@@ -1711,6 +1714,11 @@ function reset(){
 
 function update(dt,now){
 	if(konamiNotice>0)konamiNotice=Math.max(0,konamiNotice-dt);
+
+	if(plantedExplosive && !gameOver){
+		plantedExplosive.t+=dt;
+		if(plantedExplosive.t>2.2)explodeTurret();
+	}
 
 	if(paused && !gameOver){
 		pauseElapsed+=dt;
@@ -1808,10 +1816,27 @@ function draw(){
 
 	drawTurret();
 
-	// Draw the climber/planter in front of the turret so the person and
-	// explosive box remain clearly visible while reaching the top.
+	if(plantedExplosive && !turretDestroyed){
+		ctx.save();
+		ctx.translate(plantedExplosive.x,plantedExplosive.y);
+		ctx.fillStyle="#c5161d";
+		ctx.strokeStyle="#7a0d12";
+		ctx.lineWidth=2;
+		ctx.fillRect(-7,-5,14,11);
+		ctx.strokeRect(-7,-5,14,11);
+		ctx.fillStyle="#f3d54e";
+		ctx.fillRect(-2,-3,4,3);
+		ctx.strokeStyle="#ffcc33";
+		ctx.beginPath();
+		ctx.moveTo(6,-3);
+		ctx.quadraticCurveTo(13,-9,9,-15);
+		ctx.stroke();
+		ctx.restore();
+	}
+
+	// Draw the climber/planter in front of the turret while reaching the top.
 	for(const t of troopers){
-		if(["runner","plant","fuse"].includes(t.state))t.draw();
+		if(["runner","plant"].includes(t.state))t.draw();
 	}
 	ctx.fillStyle="#333";
 	for(const b of bullets){ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);ctx.fill();}
