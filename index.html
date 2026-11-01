@@ -1795,11 +1795,24 @@ function draw(){
 	for(const p of planes)p.draw();
 	for(const u of ufos)u.draw();
 	for(const dino of dinosaurs)dino.draw();
-	for(const t of troopers)t.draw();
+
+	// Draw ordinary paratroopers behind the turret.
+	for(const t of troopers){
+		if(["runner","plant","fuse"].includes(t.state))continue;
+		t.draw();
+	}
+
 	if(xyzzyFleet)drawXyzzyFleet();
 	if(paused && pauseElapsed>=60 && !saberRescueUFO)drawSaberFight();
 	if(saberRescueUFO)drawSaberRescueUFO();
+
 	drawTurret();
+
+	// Draw the climber/planter in front of the turret so the person and
+	// explosive box remain clearly visible while reaching the top.
+	for(const t of troopers){
+		if(["runner","plant","fuse"].includes(t.state))t.draw();
+	}
 	ctx.fillStyle="#333";
 	for(const b of bullets){ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);ctx.fill();}
 	for(const p of splatterParticles){
