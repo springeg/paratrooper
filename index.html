@@ -27,6 +27,7 @@
 	<span>Level: <b id="level">1</b></span>
 	<span>Turret: <b id="health">100</b>%</span>
 	<button id="pauseBtn">Pause</button>
+	<button id="roboBtn">RoboPlay: OFF</button>
 	<button id="settingsBtn">Settings</button>
 	<button id="restartBtn">Restart</button>
 </div>
@@ -57,7 +58,7 @@ const settings = document.getElementById("settings");
 const ALIEN_GREEN="#138a36";
 
 let W=0,H=0,groundY=0,dpr=1;
-let mouse={x:0,y:0}, firing=false, spaceHeld=false, rightHeld=false;
+let mouse={x:0,y:0}, firing=false, spaceHeld=false, rightHeld=false, roboPlay=false;
 let score=0, elapsed=0, gameOver=false, paused=false, pauseElapsed=0, saberFight=null, saberRescueUFO=null, xyzzyFleet=null, cheatBuffer="", konamiMode=false, konamiIndex=0, konamiNotice=0, plantedExplosive=null, turretHealth=100, turretDestroyed=false, lastFire=0;
 let planes=[], ufos=[], dinosaurs=[], bullets=[], enemyBullets=[], troopers=[], particles=[], splatterParticles=[], debris=[], explosions=[], colorExplosions=[], splats=[], trees=[];
 let planeSpawnTimer=0, ufoSpawnTimer=18, dinosaurSpawnTimer=30, nextPlaneId=1;
@@ -1418,6 +1419,93 @@ function drawTurret(){
 	ctx.save();ctx.translate(x,y-42);ctx.rotate(ang);ctx.fillStyle="#b5aaa6";ctx.strokeStyle="#333";ctx.fillRect(4,-4,38,8);ctx.strokeRect(4,-4,38,8);ctx.restore();
 }
 
+function chooseRoboTarget(){
+	const candidates=[];
+	const tx=W/2, ty=groundY-42;
+
+	// Ground troops are the most urgent because stacked troops are already
+	// committed to the pyramid and cannot be stopped by ordinary fire.
+	for(const t of troopers){
+		if(t.remove || t.dead)continue;
+
+		let priority=null;
+		if(t.state==="walk"){
+			// Increase urgency as a walker approaches the turret.
+			const danger=1-Math.min(1,Math.abs(t.x-W/2)/(W*.5));
+			priority=1000+danger*700;
+		}else if(["jump","chute"].includes(t.state)){
+			priority=760;
+		}else if(t.state==="fall"){
+			priority=360;
+		}
+
+		if(priority!==null){
+			const d=Math.hypot(t.x-tx,t.y-ty);
+			candidates.push({obj:t,kind:"trooper",score:priority-d*.12,x:t.x,y:t.y});
+		}
+	}
+
+	// Dinosaurs can remove ground defenders and are relatively durable.
+	for(const dino of dinosaurs){
+		if(dino.remove || dino.dead || dino.abducted)continue;
+		const d=Math.hypot(dino.x-tx,dino.y-ty);
+		candidates.push({obj:dino,kind:"dinosaur",score:900-d*.08,x:dino.x,y:dino.y-12});
+	}
+
+	// Normal UFOs are dangerous but secondary to troops already approaching.
+	for(const u of ufos){
+		if(u.remove || u.dead)continue;
+		const d=Math.hypot(u.x-tx,u.y-ty);
+		candidates.push({obj:u,kind:"ufo",score:690-d*.05,x:u.x,y:u.y});
+	}
+
+	// Aircraft are lower priority than immediate ground threats.
+	for(const p of planes){
+		if(p.remove || p.dead)continue;
+		const d=Math.hypot(p.x-tx,p.y-ty);
+		const base=p.mothership?720:610;
+		candidates.push({obj:p,kind:"plane",score:base-d*.04,x:p.x,y:p.y});
+	}
+
+	if(!candidates.length)return null;
+	candidates.sort((a,b)=>b.score-a.score);
+	return candidates[0];
+}
+
+function updateRoboPlay(now){
+	if(!roboPlay || paused || gameOver)return;
+
+	const target=chooseRoboTarget();
+	if(!target)return;
+
+	// Aim with modest motion prediction based on bullet travel time.
+	const ox=W/2, oy=groundY-42;
+	const travel=Math.hypot(target.x-ox,target.y-oy)/760;
+	let aimX=target.x;
+	let aimY=target.y;
+
+	if(target.kind==="trooper"){
+		const t=target.obj;
+		aimX+=(t.vx||0)*travel*.65;
+		aimY+=(t.vy||0)*travel*.65;
+	}else if(target.kind==="plane"){
+		const p=target.obj;
+		aimX+=p.dir*p.speed*travel*.75;
+		if(p.dead)aimY+=(p.vy||0)*travel;
+	}else if(target.kind==="ufo"){
+		const u=target.obj;
+		aimX+=(u.seekVX||u.dir*u.speed||0)*travel*.45;
+		aimY+=(u.seekVY||0)*travel*.45;
+	}else if(target.kind==="dinosaur"){
+		const d=target.obj;
+		aimX+=d.dir*d.speed*travel*.55;
+	}
+
+	mouse.x=clamp(aimX,0,W);
+	mouse.y=clamp(aimY,0,H);
+	shoot(now);
+}
+
 function shoot(now){
 	if(gameOver || now-lastFire<cfg.fireInterval) return;
 	lastFire=now;
@@ -1706,6 +1794,12 @@ function spawnDinosaur(dt){
 }
 
 function reset(){
+	roboPlay=false;
+	const roboBtn=document.getElementById("roboBtn");
+	if(roboBtn){
+		roboBtn.textContent="RoboPlay: OFF";
+		roboBtn.style.background="";
+	}
 	score=0;elapsed=0;gameOver=false;pauseElapsed=0;saberFight=null;saberRescueUFO=null;xyzzyFleet=null;cheatBuffer="";konamiMode=false;konamiIndex=0;konamiNotice=0;plantedExplosive=null;turretDestroyed=false;turretHealth=100;lastFire=0;planeSpawnTimer=0;ufoSpawnTimer=rand(24,38);dinosaurSpawnTimer=rand(38,58);
 	planes=[];ufos=[];dinosaurs=[];bullets=[];enemyBullets=[];troopers=[];particles=[];splatterParticles=[];debris=[];explosions=[];colorExplosions=[];splats=[];
 	makeTrees();
@@ -1755,7 +1849,11 @@ function update(dt,now){
 		for(const t of troopers)t.update(dt);
 		pyramidLayout();
 		updateBullets(dt);
-		if(firing||spaceHeld||rightHeld)shoot(now);
+		if(roboPlay){
+			updateRoboPlay(now);
+		}else if(firing||spaceHeld||rightHeld){
+			shoot(now);
+		}
 		planes=planes.filter(p=>!p.remove);
 		ufos=ufos.filter(u=>!u.remove);
 		dinosaurs=dinosaurs.filter(d=>!d.remove);
@@ -1931,7 +2029,7 @@ function drawTree(x,y,h=50,w=28){
 	ctx.restore();
 }
 
-canvas.addEventListener("mousemove",e=>{mouse.x=e.clientX;mouse.y=e.clientY});
+canvas.addEventListener("mousemove",e=>{if(!roboPlay){mouse.x=e.clientX;mouse.y=e.clientY}});
 canvas.addEventListener("contextmenu",e=>e.preventDefault());
 canvas.addEventListener("mousedown",e=>{
 	if(e.button===2){rightHeld=true;e.preventDefault()}
@@ -1976,6 +2074,18 @@ addEventListener("keydown",e=>{
 	}
 },true);
 
+document.getElementById("roboBtn").onclick=()=>{
+	roboPlay=!roboPlay;
+	const btn=document.getElementById("roboBtn");
+	btn.textContent=roboPlay?"RoboPlay: ON":"RoboPlay: OFF";
+	btn.style.background=roboPlay?"#dff2e2":"";
+	if(roboPlay){
+		firing=false;
+		spaceHeld=false;
+		rightHeld=false;
+	}
+};
+
 document.getElementById("pauseBtn").onclick=()=>{
 	if(paused){
 		// Resume: if the 60-second saber duel is active, an invulnerable
@@ -1996,6 +2106,7 @@ document.getElementById("pauseBtn").onclick=()=>{
 	document.getElementById("pauseBtn").textContent=paused?"Resume":"Pause";
 };
 document.getElementById("restartBtn").onclick=()=>{
+	roboPlay=false;
 	paused=false;
 	pauseElapsed=0;
 	saberFight=null;
